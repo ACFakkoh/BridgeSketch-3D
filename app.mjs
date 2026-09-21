@@ -1,0 +1,219 @@
+import * as T from 'three';
+import {OrbitControls} from './vendor/OrbitControls.js';
+import {defaults,validate,totalLength,spacing,clearance,setClearance,encodeConfig,decodeConfig,depths,roadLayout,steelFinishes} from './geometry.mjs';
+import {release} from './release.mjs';
+import {makeMaterials,buildBridge,disposeModel,obstacleTour} from './scene.mjs';
+
+const $=id=>document.getElementById(id),form=$('parameters');
+let config=validate(structuredClone(defaults)),model,renderer,camera,perspectiveCamera,orthoCamera,controls,scene,materials,view='perspective',pendingCamera;
+let messageTimer,driving=null;
+let needsRender=true,flowTime=0,lastTime=0,frameMs=0;
+function notify(message,error=false){clearTimeout(messageTimer);$('feedback').replaceChildren(document.createTextNode(message));$('feedback').classList.toggle('error',error);$('feedback').hidden=false;if(!error)messageTimer=setTimeout(()=>$('feedback').hidden=true,5000);}
+let activeSpan=0;
+function selectSpan(){
+  activeSpan=Number($('activeSpan').value)||0;
+  [...$('spanRows').children].forEach((row,i)=>row.hidden=i!==activeSpan);
+}
+function initWorkspace(){
+  $('release-version').textContent=release.name+' · v'+release.version;
+  $('release-date').textContent=release.date+' · '+release.author;
+  $('about-release').textContent='Version '+release.version+' · '+release.date;
+  $('about-button').onclick=()=>$('about').showModal();
+  const tabs=[...document.querySelectorAll('[role="tab"]')];
+  const activate=tab=>{for(const t of tabs){const on=t===tab;t.setAttribute('aria-selected',on);t.tabIndex=on?0:-1;$(t.getAttribute('aria-controls')).hidden=!on;}};
+  tabs.forEach((tab,i)=>{tab.onclick=()=>activate(tab);tab.onkeydown=e=>{
+    const next=e.key==='ArrowRight'?(i+1)%tabs.length:e.key==='ArrowLeft'?(i+tabs.length-1)%tabs.length:e.key==='Home'?0:e.key==='End'?tabs.length-1:-1;
+    if(next>=0){e.preventDefault();activate(tabs[next]);tabs[next].focus();}
+  };});
+  $('dock').onclick=()=>{const bottom=document.body.classList.toggle('dock-bottom');$('dock').textContent=bottom?'Dock left ←':'Dock below ↓';$('dock').setAttribute('aria-pressed',bottom);};
+  $('focus').onclick=()=>{const focus=document.body.classList.toggle('focus-mode');$('focus').setAttribute('aria-pressed',focus);$('focus').textContent=focus?'Parameters':'Focus';};
+  $('activeSpan').onchange=selectSpan;
+}
+function refreshForm(){
+  for(const el of form.querySelectorAll('[name]')){if(el.type==='checkbox')el.checked=config[el.name];else if(config[el.name]!==undefined)el.value=config[el.name];}
+  $('spanCount').value=config.spans.length;$('nebt').value=config.depth;
+  $('spanLengths').innerHTML=config.spans.map((span,i)=>`<label>Span ${i+1} · m<input data-span="${i}" data-key="length" type="number" min="10" max="60" step="1" value="${span.length}"></label>`).join('');
+  activeSpan=Math.min(activeSpan,config.spans.length-1);
+  $('activeSpan').innerHTML=config.spans.map((span,i)=>`<option value="${i}">Span ${i+1} · ${span.length} m</option>`).join('');$('activeSpan').value=activeSpan;
+  $('spanRows').innerHTML=config.spans.map((span,i)=>`<section class="span-row" ${i===activeSpan?'':'hidden'}><h3>SPAN ${i+1}</h3><label>Crossing<select data-span="${i}" data-key="obstacle">${['water','road','rail'].map(v=>`<option value="${v}" ${span.obstacle===v?'selected':''}>${v==='rail'?'Railway':v[0].toUpperCase()+v.slice(1)}</option>`).join('')}</select></label><label>Vertical clearance · m<input data-span="${i}" data-key="clearance" type="number" min=".3" max="35" step=".01" value="${clearance(config,i).toFixed(2)}"></label><details><summary>Crossing dimensions</summary><div class="field-grid">${[['width','Width · m',3,60],['elevation','Elevation · m',-5,15],['angle','Crossing angle · °',35,145]].map(([key,label,min,max])=>`<label>${label}<input data-span="${i}" data-key="${key}" type="number" min="${min}" max="${max}" step="any" value="${span[key]}"></label>`).join('')}</div></details></section>`).join('');
+  syncWaterFields();
+  syncEnabled();
+}
+function syncWaterFields(){
+  config.spans.forEach((span,i)=>{const row=$('spanRows').children[i];if(!row)return;row.querySelector('.river-hint')?.remove();row.querySelector('[data-key="clearance"]').value=clearance(config,i).toFixed(2);row.querySelector('[data-key="elevation"]').value=Number(span.elevation.toFixed(4));const joined=span.obstacle==='water'&&(config.spans[i-1]?.obstacle==='water'||config.spans[i+1]?.obstacle==='water');
+    row.querySelector('[data-key="width"]').disabled=span.obstacle==='water'&&config.spans[i-1]?.obstacle==='water'&&config.spans[i+1]?.obstacle==='water';
+    if(joined){const hint=document.createElement('p');hint.className='hint river-hint';hint.textContent='Joined river: elevation and angle apply to all adjacent water spans. Edge-span widths set the banks.';row.querySelector('details').append(hint);}
+  });
+}
+function syncEnabled(){
+  const steel=config.material==='steel'||config.material==='box',box=config.material==='box',slab=config.material==='slab';$('nebt-label').hidden=steel||slab;$('steel-depth-label').hidden=!steel;$('slab-depth-label').hidden=!slab;$('steel-color-label').hidden=!steel;$('flange-note').hidden=!steel;$('box-width-label')?.toggleAttribute('hidden',!box);
+  for(const name of ['girders','overhang','haunch'])form.elements[name].disabled=slab;
+  $('variable-depth-fields').hidden=!(steel||slab);form.elements.variableDepth.disabled=config.spans.length<2;form.elements.pierDepth.disabled=!config.variableDepth;form.elements.taper.disabled=!config.variableDepth;form.elements.variableDepth.checked=config.variableDepth;form.elements.girders.step='1';$('girder-count-label').hidden=box||slab;$('box-count-label').hidden=!box;$('boxCount').value=config.girders;form.elements.girders.value=config.girders;
+  form.elements.wingAngle.disabled=config.abutmentType!=='wing';$('wing-angle-label').hidden=config.abutmentType!=='wing';
+  $('column-shape-label').hidden=config.pierType!=='bent';$('column-size-label').textContent=config.columnShape==='square'?'Column side · m':'Column diameter · m';
+  form.elements.sidewalkWidth.disabled=config.sidewalkSide==='none';$('median-width-label').hidden=config.medianType!=='sidewalk';
+  $('steel-swatch').hidden=!steel;$('steel-swatch').style.background=steelFinishes[config.steelColor];
+  form.elements.columns.disabled=config.pierType!=='bent';
+  $('columns-label').hidden=config.pierType!=='bent';$('column-diameter-label').hidden=config.pierType!=='bent';$('wall-settings').hidden=config.pierType!=='wall';$('hammerhead-settings').hidden=config.pierType!=='hammerhead';
+  $('continuity-note').textContent=slab?(config.continuous?'Continuous solid slab across supports.':'Solid slab spans with joints at supports.'):!config.continuous?'Separate girder spans with joints at piers.':steel?'Unbroken girders and one bearing line at each pier.':'Precast spans joined with concrete closure diaphragms.';
+  form.elements.material.options[0].disabled=config.curved;form.elements.radius.disabled=!config.curved;form.elements.direction.disabled=!config.curved;
+  form.elements.rise.disabled=config.profile!=='crest';form.elements.grade.disabled=config.profile!=='constant';
+  $('material-note').textContent=slab?(config.variableDepth?'Solid concrete slab · variable depth':'Solid concrete slab · constant depth'):box?'Hollow box · webs incline 1H:4V':steel?'Plate girder · depth includes both flanges':'Metric NEBT family · 1200 / 810 mm flanges';
+  const layout=roadLayout(config);$('shoulders').textContent=Math.abs(layout.leftShoulder-layout.rightShoulder)<.001?layout.leftShoulder.toFixed(2)+' m':layout.leftShoulder.toFixed(2)+' / '+layout.rightShoulder.toFixed(2)+' m';
+}
+function readForm(){
+  const raw=structuredClone(config);
+  for(const el of form.querySelectorAll('[name]')) raw[el.name]=el.type==='checkbox'?el.checked:(el.type==='number'||el.name==='direction'?Number(el.value):el.value);
+  if(raw.material==='concrete'&&!raw.curved)raw.depth=Number($('nebt').value)||1.4;
+  for(const el of form.querySelectorAll('[data-span]:not([data-key="clearance"])'))raw.spans[Number(el.dataset.span)][el.dataset.key]=el.type==='number'?Number(el.value):el.value;
+  return raw;
+}
+function update(raw,{resetCamera=false,refresh=false}={}){
+  stopDriving();
+  const next=validate(raw),started=performance.now(),replacement=buildBridge(next,materials);
+  if(model){scene.remove(model.root);disposeModel(model);}config=next;model=replacement;scene.add(model.root);model.deck.visible=!$('reveal').checked;model.setting.visible=view!=='elevation';
+  document.body.classList.toggle('background-white',config.background==='white');
+  if(refresh)refreshForm();else {syncEnabled();syncWaterFields();}
+  const L=totalLength(config);$('length').innerHTML=`${L.toFixed(1)} <small>m</small>`;$('area').innerHTML=`${Math.round(L*config.width).toLocaleString()} <small>m²</small>`;$('spacing').textContent=`${config.material==='slab'?'Not applicable':spacing(config).toFixed(2)+' m'}`;
+  $('clearance').innerHTML=`${Math.min(...config.spans.map((_,i)=>clearance(config,i))).toFixed(2)} <small>m</small>`;
+  let triangles=0;model.root.traverse(o=>{if(o.isMesh)triangles+=(o.geometry.index?.count??o.geometry.attributes.position.count)/3*(o.isInstancedMesh?o.count:1);});$('triangles').innerHTML=`${(triangles/1000).toFixed(1)}<small>k tris</small>`;
+  $('sceneTitle').textContent=config.curved?'Curved viaduct':config.spans.every(s=>s.obstacle==='water')?'River crossing':'Bridge crossing';
+  $('sceneSubtitle').textContent=`${config.spans.length} ${config.spans.length===1?'span':'spans'} · ${config.material==='slab'?'Solid concrete slab':config.material==='concrete'?'NEBT '+config.depth*1000:config.material==='box'?'Steel box girders':'Steel plate girders'} · ${config.environment}`;
+  if(resetCamera)fit(view);
+  needsRender=true;const updateMs=performance.now()-started;
+  $('preset').value='custom';
+  window.bridgeSketch=window.bridgeViewer={getConfig:()=>structuredClone(config),update:(raw)=>update(raw,{refresh:true}),getStats:()=>({triangles,updateMs,frameMs,geometries:renderer.info.memory.geometries,drawCalls:renderer.info.render.calls})};
+}
+function fit(mode='perspective'){
+  stopDriving(false);
+  model.setting.visible=mode!=='elevation';
+  view=mode;camera=mode==='perspective'?perspectiveCamera:orthoCamera;controls.object=camera;controls.enableRotate=mode==='perspective';camera.up.set(0,1,0);
+  const bounds=new T.Box3().setFromObject(model.structure);if(mode!=='elevation')bounds.union(new T.Box3().setFromObject(model.deck));const target=bounds.getCenter(new T.Vector3());
+  const width=$('canvasHost').clientWidth,height=$('canvasHost').clientHeight,aspect=width/height;
+  const direction=mode==='plan'?new T.Vector3(0,1,.00001):mode==='elevation'?new T.Vector3(0,0,1):new T.Vector3(.73,.55,.85).normalize();
+  if(mode==='plan')camera.up.set(0,0,-1);
+  camera.position.copy(target).add(direction);camera.lookAt(target);camera.updateMatrixWorld();
+  const right=new T.Vector3().setFromMatrixColumn(camera.matrixWorld,0),up=new T.Vector3().setFromMatrixColumn(camera.matrixWorld,1),tanV=Math.tan(18*Math.PI/180)*Math.max(.4,(height-165)/height),tanH=Math.tan(18*Math.PI/180)*aspect*(width-70)/width;
+  let distance=20,halfHeight=5;
+  for(const x of [bounds.min.x,bounds.max.x])for(const y of [bounds.min.y,bounds.max.y])for(const z of [bounds.min.z,bounds.max.z]){
+    const p=new T.Vector3(x,y,z).sub(target),px=Math.abs(p.dot(right)),py=Math.abs(p.dot(up)),depth=p.dot(direction);
+    distance=Math.max(distance,depth+Math.max(px/tanH,py/tanV));halfHeight=Math.max(halfHeight,px/aspect/(1-70/width),py/Math.max(.4,(height-165)/height));
+  }
+  if(camera.isOrthographicCamera){camera.top=halfHeight*1.06;camera.bottom=-camera.top;camera.right=camera.top*aspect;camera.left=-camera.right;camera.zoom=1;}else camera.aspect=aspect;
+  camera.position.copy(target).addScaledVector(direction,distance*1.06);controls.target.copy(target);camera.updateProjectionMatrix();
+  controls.update();needsRender=true;document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.view===mode));
+}
+function captureCamera(){return {position:camera.position.toArray(),target:controls.target.toArray(),view,zoom:camera.zoom};}
+function restoreCamera(saved){
+  if(!saved)return;
+  if(!Array.isArray(saved.position)||!Array.isArray(saved.target)||saved.position.length!==3||saved.target.length!==3||![...saved.position,...saved.target].every(v=>Number.isFinite(v)&&Math.abs(v)<10000))return;
+  fit(['plan','elevation'].includes(saved.view)?saved.view:'perspective');
+  if(new T.Vector3(...saved.position).distanceTo(new T.Vector3(...saved.target))<1)return;
+  camera.position.fromArray(saved.position);controls.target.fromArray(saved.target);camera.zoom=Number.isFinite(saved.zoom)?T.MathUtils.clamp(saved.zoom,.1,20):1;camera.updateProjectionMatrix();controls.update();needsRender=true;
+}
+function stopDriving(restore=true){
+  if(!driving)return;
+  const saved=driving.saved;driving=null;controls.enabled=true;controls.enableDamping=true;
+  perspectiveCamera.fov=36;perspectiveCamera.updateProjectionMatrix();
+  const traffic=model.setting.children.find(o=>o.name==='Traffic');if(traffic)traffic.visible=true;model.deck.visible=!$('reveal').checked;
+  $('drive').textContent='Drive';$('drive').setAttribute('aria-pressed','false');$('drive-status').hidden=true;
+  if(restore)restoreCamera(saved);needsRender=true;
+}
+function startDriving(){
+  if(driving){stopDriving();return;}
+  const saved=captureCamera();fit('perspective');controls.autoRotate=false;$('tour').checked=false;
+  controls.enabled=false;controls.enableDamping=false;perspectiveCamera.fov=62;perspectiveCamera.updateProjectionMatrix();
+  const route=obstacleTour(config);driving={saved,route,station:-route.reach};
+  const traffic=model.setting.children.find(o=>o.name==='Traffic');if(traffic)traffic.visible=false;model.deck.visible=true;
+  $('drive').textContent='Stop';$('drive').setAttribute('aria-pressed','true');$('drive-status').hidden=false;
+  driveFrame(0);
+}
+function driveFrame(dt){
+  driving.station+=dt*30/3.6;const s=driving.station,{route}=driving;
+  if(s>route.reach){stopDriving();return;}
+  const pose=route.pose(s);camera.position.fromArray(pose.position);
+  controls.target.fromArray(pose.target);camera.lookAt(controls.target);
+  const label={road:'ROAD',water:'RIVER',rail:'RAILWAY'}[route.type];
+  $('drive-status').textContent=label+' VIEW · SPAN '+(route.index+1)+' · '+Math.round((s+route.reach)/(2*route.reach)*100)+'% · Esc to stop';
+  needsRender=true;
+}
+function download(blob,name){const a=document.createElement('a'),url=URL.createObjectURL(blob);a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+async function boot(){
+  renderer=new T.WebGLRenderer({antialias:true,alpha:true,preserveDrawingBuffer:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.6));renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;renderer.setClearColor(0x000000,0);renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1.12;$('canvasHost').append(renderer.domElement);
+  renderer.domElement.setAttribute('aria-label','3D bridge model. Use the view buttons for fixed camera views.');
+  scene=new T.Scene();const hemi=new T.HemisphereLight(0xdcefff,0x9b9c87,2.3);scene.add(hemi);
+  // A local sky dome supplies soft reflections on water, glass and painted steel.
+  const skyScene=new T.Scene(),skyGeometry=new T.SphereGeometry(100,32,16),skyColors=[];
+  const skyPos=skyGeometry.attributes.position;
+  for(let i=0;i<skyPos.count;i++){
+    const y=skyPos.getY(i)/100,color=new T.Color(y<0?'#74776b':'#dce6e7');
+    if(y>0)color.lerp(new T.Color('#9db8ce'),Math.pow(y,.6));skyColors.push(color.r,color.g,color.b);
+  }
+  skyGeometry.setAttribute('color',new T.Float32BufferAttribute(skyColors,3));
+  const skyMaterial=new T.MeshBasicMaterial({vertexColors:true,side:T.BackSide});skyScene.add(new T.Mesh(skyGeometry,skyMaterial));
+  const pmrem=new T.PMREMGenerator(renderer);scene.environment=pmrem.fromScene(skyScene,.04).texture;scene.environmentIntensity=.7;
+  pmrem.dispose();skyGeometry.dispose();skyMaterial.dispose();
+  const sun=new T.DirectionalLight(0xfff5e5,3.0);sun.position.set(-45,65,40);sun.castShadow=true;sun.shadow.mapSize.set(4096,4096);sun.shadow.camera.left=-160;sun.shadow.camera.right=160;sun.shadow.camera.top=110;sun.shadow.camera.bottom=-110;sun.shadow.camera.far=250;sun.shadow.normalBias=.04;sun.shadow.bias=-.00015;scene.add(sun);
+  const fill=new T.DirectionalLight(0xd4eaff,1.15);fill.position.set(50,25,-45);scene.add(fill);
+  scene.userData.lights={hemi,sun,fill};
+  perspectiveCamera=new T.PerspectiveCamera(36,1,.1,5000);orthoCamera=new T.OrthographicCamera(-50,50,50,-50,.1,5000);camera=perspectiveCamera;controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.dampingFactor=.08;controls.minDistance=8;controls.maxDistance=2500;controls.maxPolarAngle=Math.PI*.5;
+  materials=makeMaterials(()=>needsRender=true);
+  if(location.hash){try{const saved=decodeConfig(location.hash);config=saved.config;pendingCamera=saved.camera;}catch(e){notify(e.message,true);}}
+  update(config,{refresh:true,resetCamera:true});
+  if(!location.hash)$('preset').value='river';
+  restoreCamera(pendingCamera);
+  const resize=()=>{const {clientWidth:w,clientHeight:h}=$('canvasHost');renderer.setSize(w,h);perspectiveCamera.aspect=w/h;perspectiveCamera.updateProjectionMatrix();orthoCamera.right=orthoCamera.top*w/h;orthoCamera.left=-orthoCamera.right;orthoCamera.updateProjectionMatrix();needsRender=true;};new ResizeObserver(resize).observe($('canvasHost'));resize();
+  controls.addEventListener('change',()=>needsRender=true);$('dusk').onchange=()=>{const dusk=$('dusk').checked;const {hemi,sun,fill}=scene.userData.lights;hemi.color.set(dusk?0xdce7ff:0xe1efff);hemi.groundColor.set(dusk?0x777565:0x9b9c87);hemi.intensity=dusk?1.6:2.3;fill.intensity=dusk?.5:1.15;sun.color.set(dusk?0xffd4a0:0xfff3dd);sun.intensity=dusk?2.6:3.0;sun.position.set(-45,dusk?22:65,40);renderer.toneMappingExposure=dusk?1.02:1.12;needsRender=true;};
+  $('tour').onchange=()=>{stopDriving();if($('tour').checked&&view!=='perspective')fit('perspective');controls.autoRotate=$('tour').checked;controls.autoRotateSpeed=.6;needsRender=true;};
+  $('drive').onclick=startDriving;window.addEventListener('keydown',e=>{if(e.key==='Escape')stopDriving();});
+  renderer.setAnimationLoop(time=>{const dt=Math.min(.05,(time-lastTime)/1000);lastTime=time;if(document.hidden)return;if(driving)driveFrame(dt);else controls.update(dt);const flowing=model.waters.length>0;if(flowing){flowTime+=dt;materials.water.userData.flowTime.value=flowTime;}if(needsRender||flowing||controls.autoRotate){const start=performance.now();renderer.render(scene,camera);frameMs=performance.now()-start;needsRender=false;}});
+  registerTools();
+}
+form.addEventListener('submit',e=>e.preventDefault());
+form.addEventListener('change',e=>{
+ if(e.target.id==='activeSpan')return;
+ try{
+  if(e.target.id==='spanCount'){
+    const count=Number(e.target.value);if(!Number.isInteger(count)||count<1||count>8)throw Error('Use 1 to 8 spans.');
+    const raw=readForm();raw.spans=Array.from({length:count},(_,i)=>raw.spans[i]??{...raw.spans.at(-1)});update(raw,{refresh:true,resetCamera:true});
+  }else{const raw=readForm();if(raw.curved&&raw.material==='concrete')raw.material='steel';
+    if(e.target.dataset.span!==undefined){const index=Number(e.target.dataset.span),key=e.target.dataset.key;if(key==='clearance')setClearance(raw,index,Number(e.target.value));if(raw.spans[index].obstacle==='water'){
+      let a=index,b=index;while(a>0&&raw.spans[a-1].obstacle==='water')a--;while(b<raw.spans.length-1&&raw.spans[b+1].obstacle==='water')b++;
+      for(let j=a;j<=b;j++)for(const k of ['elevation','angle']){raw.spans[j][k]=raw.spans[index][k];form.querySelector(`[data-span="${j}"][data-key="${k}"]`).value=raw.spans[index][k];}
+    }}
+    if(e.target.id==='boxCount')raw.girders=Number(e.target.value);
+    if(e.target.name==='material'&&raw.material==='box'){
+      raw.girders=[2,4].includes(raw.girders)?raw.girders:4;
+      if((raw.width-2*raw.overhang)/(raw.girders-1)<raw.boxTopWidth+.2)raw.girders=2;
+      raw.overhang=Math.max(raw.overhang,raw.boxTopWidth/2);
+    }
+    if(e.target.name==='material'&&raw.material==='concrete'){raw.depth=depths.reduce((a,b)=>Math.abs(b-config.depth)<Math.abs(a-config.depth)?b:a);$('nebt').value=raw.depth;}
+    update(raw);form.elements.material.value=config.material;form.elements.overhang.value=config.overhang;}
+  $('feedback').hidden=true;
+ }catch(error){refreshForm();notify(`${error.message} The last valid model remains visible.`,true);}
+});
+document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{controls.autoRotate=false;$('tour').checked=false;fit(b.dataset.view);}));$('fit').onclick=()=>fit(view);$('reveal').onchange=()=>{if(model)model.deck.visible=!$('reveal').checked;needsRender=true;};
+$('reset').onclick=()=>{update(structuredClone(defaults),{refresh:true,resetCamera:true});$('preset').value='river';$('feedback').hidden=true;};
+$('preset').onchange=()=>{
+ const c=structuredClone(defaults),preset=$('preset').value;
+ if(preset==='steel'){Object.assign(c,{material:'steel',curved:true,radius:160,depth:1.6,continuous:true,variableDepth:true,pierDepth:2.5,environment:'urban',skew:12});c.spans=[{length:28,obstacle:'road',width:12,elevation:0,angle:90},{length:34,obstacle:'rail',width:7,elevation:0,angle:80},{length:28,obstacle:'road',width:12,elevation:0,angle:90}];}
+ if(preset==='mixed'){Object.assign(c,{skew:18,environment:'urban'});c.spans[0].obstacle='road';c.spans[0].width=10;c.spans[1].obstacle='rail';c.spans[1].width=6;}
+ update(c,{refresh:true,resetCamera:true});$('preset').value=preset;$('feedback').hidden=true;
+};
+$('save').onclick=()=>download(new Blob([JSON.stringify({release,config,camera:captureCamera()},null,2)],{type:'application/json'}),'bridgesketch.json');
+$('load').onclick=()=>$('file').click();$('file').onchange=async()=>{try{const file=$('file').files[0];if(!file)return;if(file.size>24000)throw Error('Choose a BridgeSketch 3D configuration smaller than 24 KB.');const data=JSON.parse(await file.text()),saved={config:validate(data.config??data),camera:data.camera};update(saved.config,{refresh:true,resetCamera:true});restoreCamera(saved.camera);notify('Configuration loaded.');}catch(e){notify(e.message,true);}finally{$('file').value='';}};
+$('share').onclick=async()=>{const url=new URL(location.href);url.hash=encodeConfig(config,captureCamera());history.replaceState(null,'',url);try{await navigator.clipboard.writeText(url.href);notify('Link copied. It includes the bridge and camera view.');}catch{notify('Copy this link to share the bridge and camera view.');clearTimeout(messageTimer);const field=document.createElement('input');field.type='text';field.readOnly=true;field.value=url.href;field.setAttribute('aria-label','Bridge share link');field.style.cssText='width:100%;margin-top:10px;padding:8px';$('feedback').append(field);field.focus();field.select();}};
+$('image').onclick=()=>{renderer.render(scene,camera);const canvas=document.createElement('canvas');canvas.width=renderer.domElement.width;canvas.height=renderer.domElement.height;const ctx=canvas.getContext('2d');const bg=ctx.createRadialGradient(canvas.width*.45,canvas.height*.12,0,canvas.width*.45,canvas.height*.12,canvas.width);bg.addColorStop(0,'#5e7b8b');bg.addColorStop(.52,'#35566c');bg.addColorStop(1,'#203d51');ctx.fillStyle=config.background==='white'?'#ffffff':bg;ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(renderer.domElement,0,0);canvas.toBlob(blob=>{if(blob){download(blob,'bridge-view.png');notify('Snapshot saved.');}else notify('Could not create the snapshot.',true);},'image/png');};
+$('export-glb').onclick=async()=>{const button=$('export-glb');button.disabled=true;button.textContent='Exporting…';let waterMaterial;try{const {GLTFExporter}=await import('./vendor/GLTFExporter.js');const copy=model.root.clone(true);copy.children[0].visible=true;copy.children[2].visible=true;waterMaterial=new T.MeshStandardMaterial({color:'#427f84',roughness:.3});copy.traverse(o=>{if(o.material?.isShaderMaterial)o.material=waterMaterial;});const binary=await new GLTFExporter().parseAsync(copy,{binary:true,maxTextureSize:1024});download(new Blob([binary],{type:'model/gltf-binary'}),'bridge.glb');notify('3D model exported. Save JSON to keep editable parameters.');}catch(e){notify(`Model export failed: ${e.message}`,true);}finally{waterMaterial?.dispose();button.disabled=false;button.textContent='Export GLB';}};
+function registerTools(){
+  if(!document.modelContext?.registerTool)return;
+  const lifecycle=new AbortController();window.addEventListener('pagehide',()=>lifecycle.abort(),{once:true});
+  const properties=Object.fromEntries(Object.entries(defaults).filter(([k])=>!['spans','version','web','deck','asphalt','barrier'].includes(k)).map(([k,v])=>[k,{type:typeof v}]));
+  properties.spans={type:'array',minItems:1,maxItems:8,items:{type:'object',properties:{length:{type:'number'},obstacle:{type:'string',enum:['water','road','rail']},width:{type:'number'},elevation:{type:'number'},angle:{type:'number'}},required:['length','obstacle','width','elevation','angle'],additionalProperties:false}};
+  for(const tool of [{name:'get_bridge_configuration',description:'Read the current bridge parameters and geometry statistics.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true},execute:()=>({config:structuredClone(config),stats:window.bridgeViewer.getStats()})},{name:'configure_bridge',description:'Apply bridge parameters to the visible model. Supports plate and even-count box girders, variable-depth solid slabs, lanes, sidewalks, barriers and wingwalls. Asphalt 65 mm and steel web 14 mm remain fixed.',inputSchema:{type:'object',properties,additionalProperties:false},annotations:{readOnlyHint:false},execute:async parameters=>{if(!parameters||typeof parameters!=='object'||Array.isArray(parameters))throw Error('Provide bridge parameters.');update({...config,...parameters},{refresh:true});renderer.render(scene,camera);return {config:structuredClone(config),stats:window.bridgeViewer.getStats()};}}]){
+    try{Promise.resolve(document.modelContext.registerTool(tool,{signal:lifecycle.signal})).catch(console.warn);}catch(e){console.warn(e);}
+  }
+}
+window.addEventListener('hashchange',()=>{try{const saved=decodeConfig(location.hash);update(saved.config,{refresh:true,resetCamera:true});restoreCamera(saved.camera);}catch(e){notify(e.message,true);}});
+initWorkspace();
+boot().catch(e=>{$('fatal').hidden=false;$('fatal').textContent=`The 3D viewer could not start. Check that hardware acceleration and WebGL 2 are enabled in your desktop browser. ${e.message}`;console.error(e);});
