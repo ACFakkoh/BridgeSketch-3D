@@ -2,28 +2,36 @@ export const defaults = {
   version:1, width:12, overhang:1.2, girders:5, material:'concrete', depth:1.4,
   web:0.014, deck:0.225, slabDepth:0.8, asphalt:0.065, haunch:0.1, barrier:1.1,
   continuous:false, variableDepth:false, pierDepth:2.4, taper:30, steelColor:'blue',
-  barrierType:'concrete', abutmentType:'return', wingAngle:30, laneCount:2, sidewalkSide:'none', sidewalkWidth:3, showTraffic:true, boxTopWidth:2.4,
+  barrierType:'concrete', abutmentType:'return', wingAngle:30, laneCount:2, sidewalkSide:'none', sidewalkWidth:3, showTraffic:true, boxTopWidth:2.4, boxBottomWidth:1.7,
+  laneWidth:3.5, movingTraffic:true, bentWidth:1.9, bentThickness:1,
   pierType:'bent', columns:2, columnShape:'round',
   columnDiameter:1.3, hammerheadWidth:2.4, hammerheadThickness:1.0, wallThickness:0.8,
   skew:0, curved:false, radius:250, direction:1,
   elevation:7, profile:'crest', rise:0.45, grade:0, approach:22,
-  environment:'rural', background:'blue', seed:17, medianType:'none', medianWidth:1.2,
+  environment:'rural', terrainMode:'grass', sceneWidth:140, background:'blue', timeOfDay:17.5, seed:17, trainStyle:'mixed', medianType:'none', medianWidth:1.2,
   spans:[25,25,25].map(length=>({length,obstacle:'water',width:22,elevation:0,angle:90}))
 };
 export const depths = [1,1.2,1.4,1.6,1.8];
 export const totalLength = c => c.spans.reduce((n,s)=>n+s.length,0);
 export const spacing = c => (c.width-2*c.overhang)/(c.girders-1);
+export function fitBoxLayout(c){
+  const edge=1.2,gap=1;
+  const boxTopWidth=Number(((c.width-2*edge-(c.girders-1)*gap)/c.girders).toFixed(3));
+  if(boxTopWidth<.8||boxTopWidth>15)throw Error('This deck width cannot fit that many boxes with safe spacing.');
+  return {...c,boxTopWidth,boxBottomWidth:Number((boxTopWidth-c.depth/2).toFixed(3)),overhang:Number((edge+boxTopWidth/2).toFixed(3))};
+}
 export const stations = c => c.spans.reduce((a,s)=>[...a,a.at(-1)+s.length],[0]);
 export const roadLayout = c => {
   const left=c.sidewalkSide==='left'||c.sidewalkSide==='both',right=c.sidewalkSide==='right'||c.sidewalkSide==='both';
   const barrierWidth=c.barrierType==='steel'?.32:.45;
   const roadMin=-c.width/2+barrierWidth+(left?c.sidewalkWidth:0),roadMax=c.width/2-barrierWidth-(right?c.sidewalkWidth:0);
   const medianWidth=c.medianType==='barrier'?.6:c.medianType==='sidewalk'?c.medianWidth:0,medianCentre=(roadMin+roadMax)/2,medianMin=medianCentre-medianWidth/2,medianMax=medianCentre+medianWidth/2;
-  const split=Math.floor(c.laneCount/2),shoulders=(roadMax-roadMin-medianWidth-c.laneCount*3.5)/2;
-  const leftShoulder=medianWidth?medianMin-roadMin-split*3.5:shoulders,rightShoulder=medianWidth?roadMax-medianMax-(c.laneCount-split)*3.5:shoulders;
-  const laneStart=roadMin+leftShoulder,laneCenters=Array.from({length:c.laneCount},(_,i)=>medianWidth&&i>=split?medianMax+1.75+(i-split)*3.5:laneStart+1.75+i*3.5);
+  const laneWidth=c.laneWidth,split=Math.floor(c.laneCount/2),shoulders=(roadMax-roadMin-medianWidth-c.laneCount*laneWidth)/2;
+  const leftShoulder=medianWidth?medianMin-roadMin-split*laneWidth:shoulders,rightShoulder=medianWidth?roadMax-medianMax-(c.laneCount-split)*laneWidth:shoulders;
+  const laneStart=roadMin+leftShoulder,laneCenters=Array.from({length:c.laneCount},(_,i)=>medianWidth&&i>=split?medianMax+laneWidth/2+(i-split)*laneWidth:laneStart+laneWidth/2+i*laneWidth);
+  const laneEdges=[...new Set(laneCenters.flatMap(u=>[u-laneWidth/2,u+laneWidth/2]).map(u=>Number(u.toFixed(8))))].sort((a,b)=>a-b);
   const dividers=laneCenters.slice(1).flatMap((u,i)=>medianWidth&&i+1===split?[]:[{u:(u+laneCenters[i])/2,opposing:i+1===split}]);
-  return {left,right,barrierWidth,roadMin,roadMax,shoulders,leftShoulder,rightShoulder,laneStart,laneCenters,dividers,medianWidth,medianCentre,medianMin,medianMax};
+  return {left,right,barrierWidth,roadMin,roadMax,shoulders,leftShoulder,rightShoulder,laneStart,laneCenters,laneEdges,dividers,medianWidth,medianCentre,medianMin,medianMax};
 };
 // +u is the driver's right when travelling in the increasing-station direction.
 export const laneForward = (c,index) => c.laneCount===1 || index>=Math.floor(c.laneCount/2);
@@ -37,24 +45,32 @@ export function validate(raw) {
   if(raw.version!==undefined && raw.version!==1) throw Error('This configuration version is not supported.');
   const c={...defaults,...Object.fromEntries(Object.keys(defaults).filter(k=>Object.hasOwn(raw,k)).map(k=>[k,raw[k]]))};
   c.steelColor=({bluegreen:'blue',greengray:'gray',red:'weathered'})[c.steelColor]??c.steelColor;
+  if(!Object.hasOwn(raw,'boxBottomWidth'))c.boxBottomWidth=c.boxTopWidth-c.depth/2;
   Object.assign(c,{asphalt:.065,deck:.225,web:.014,barrier:1.1});
-  const limits={width:[4,30],overhang:[0.65,4],girders:[2,14],depth:[0.4,3],slabDepth:[.3,2],pierDepth:[0.4,5],taper:[10,45],columnDiameter:[0.35,3],hammerheadWidth:[1,8],hammerheadThickness:[0.35,2],wallThickness:[0.25,2],web:[0.008,0.08],deck:[0.15,0.6],asphalt:[0.025,0.2],haunch:[0.05,0.5],barrier:[0.8,1.5],wingAngle:[0,90],laneCount:[1,8],sidewalkWidth:[.5,6],boxTopWidth:[.8,6],skew:[-45,45],radius:[80,5000],elevation:[3,30],rise:[0,3],grade:[-6,6],approach:[5,60],seed:[0,99999]};
+  const limits={width:[4,30],overhang:[0.65,8],girders:[2,14],depth:[0.4,3],slabDepth:[.3,2],pierDepth:[0.4,5],taper:[10,45],columnDiameter:[0.35,3],hammerheadWidth:[1,8],hammerheadThickness:[0.35,2],wallThickness:[0.25,2],web:[0.008,0.08],deck:[0.15,0.6],asphalt:[0.025,0.2],haunch:[0.05,0.5],barrier:[0.8,1.5],wingAngle:[0,90],laneCount:[1,8],sidewalkWidth:[.5,6],boxTopWidth:[.8,15],boxBottomWidth:[.3,15],sceneWidth:[90,240],timeOfDay:[6,20],skew:[-45,45],radius:[80,5000],elevation:[3,30],rise:[0,3],grade:[-6,6],approach:[5,60],seed:[0,99999]};
+  Object.assign(limits,{laneWidth:[2.5,4.5],bentWidth:[.5,5],bentThickness:[.35,3]});
   for(const [k,[lo,hi]] of Object.entries(limits)) if(typeof c[k]!=='number'||!Number.isFinite(c[k])||c[k]<lo||c[k]>hi) throw Error(`${k}: enter a number from ${lo} to ${hi}.`);
+  if(typeof c.movingTraffic!=='boolean')throw Error('Invalid moving traffic option.');
   if(!Number.isInteger(c.girders)||!Number.isInteger(c.seed)||!Number.isInteger(c.laneCount)) throw Error('Girder count, lane count and scenery seed must be whole numbers.');
   if(typeof c.curved!=='boolean'||![1,-1].includes(c.direction)) throw Error('Invalid horizontal alignment.');
   if(typeof c.continuous!=='boolean'||!['weathered','green','blue','bluegreen','greengray','gray','red'].includes(c.steelColor)||!['concrete','steel','box','slab'].includes(c.material)||!['concrete','steel'].includes(c.barrierType)||!['return','wing'].includes(c.abutmentType)||!['none','left','right','both'].includes(c.sidewalkSide)||!['bent','wall','hammerhead'].includes(c.pierType)||!Number.isInteger(c.columns)||c.columns<1||c.columns>6) throw Error('Invalid material, barrier, wall, sidewalk or pier configuration.');
+  if(!['mixed','diesel','bullet','city'].includes(c.trainStyle))throw Error('Select a train style.');
+  if(!['grass','snow'].includes(c.terrainMode))throw Error('Select grass or snow terrain.');
   if(!['rural','urban','none'].includes(c.environment)||!['crest','constant'].includes(c.profile)||typeof c.showTraffic!=='boolean') throw Error('Invalid environment, profile or traffic option.');
   // All entry points (controls, files, links and agent tools) enforce the same rule.
   if(c.curved&&c.material==='concrete') c.material='steel';
   if(typeof c.variableDepth!=='boolean') throw Error('Invalid variable-depth option.');
   if(c.material!=='steel'&&c.material!=='box'&&c.material!=='slab') c.variableDepth=false;
-  if(c.material==='box'&&![2,4].includes(c.girders)) throw Error('Steel box girders: select 2 or 4 boxes (even count).');
   if(!['round','square'].includes(c.columnShape)) throw Error('Select round or square columns.');
   if(!['blue','white'].includes(c.background))throw Error('Select a blue or white background.');
   if(!['none','barrier','sidewalk'].includes(c.medianType)||typeof c.medianWidth!=='number'||!Number.isFinite(c.medianWidth)||c.medianWidth<.6||c.medianWidth>4)throw Error('Select a median type and an island width from 0.6 to 4 m.');
   if(c.medianType!=='none'&&c.laneCount<2)throw Error('A centre median needs at least two lanes.');
   if(c.variableDepth&&c.pierDepth<(c.material==='slab'?c.slabDepth:c.depth)) throw Error('Depth at piers must be at least the typical girder depth.');
-  if(c.material==='box'&&c.boxTopWidth-(c.variableDepth?c.pierDepth:c.depth)/2<=.114) throw Error('Box girder depth leaves no internal width; increase box top width or reduce depth.');
+  if(c.material==='box'){
+    const deepest=c.variableDepth?c.pierDepth:c.depth;
+    if(c.boxBottomWidth>c.boxTopWidth)throw Error('Box bottom flange must not be wider than the top flange.');
+    if(Math.min(c.boxTopWidth-deepest/2,c.boxBottomWidth)<=.28)throw Error('Box girder depth leaves no internal width; increase flange widths or reduce depth.');
+  }
   if(c.material==='concrete'&&!depths.includes(c.depth)) throw Error('Select a standard NEBT depth.');
   if(!Array.isArray(c.spans)||c.spans.length<1||c.spans.length>8) throw Error('Use 1 to 8 spans.');
   if(c.spans.length===1)c.variableDepth=false;
@@ -66,8 +82,12 @@ export function validate(raw) {
     return v;
   });
   if(c.material!=='slab'&&spacing(c)<(c.material==='concrete'?1.3:c.material==='box'?c.boxTopWidth+.2:.65)) throw Error('Girders overlap: increase deck width, reduce overhang or use fewer girders.');
-  if(!Object.hasOwn(raw,'laneCount'))c.laneCount=Math.max(1,Math.min(2,Math.floor((c.width-2*roadLayout(c).barrierWidth)/3.5)));
-  if(c.material==='box'&&c.overhang<c.boxTopWidth/2)throw Error('Box girders extend beyond the deck: increase overhang to at least '+(c.boxTopWidth/2).toFixed(2)+' m.');
+  if(!Object.hasOwn(raw,'laneCount'))c.laneCount=Math.max(1,Math.min(2,Math.floor((c.width-2*roadLayout(c).barrierWidth)/c.laneWidth)));
+  if(c.material==='box'){
+    const gap=spacing(c)-c.boxTopWidth,edge=c.overhang-c.boxTopWidth/2;
+    if(edge<.35||edge>2.01)throw Error('Box edge cantilever must be 0.35 to 2.0 m; adjust box width or overhang.');
+    if(gap>2.01)throw Error('Box girders are too far apart; increase box width or edge overhang.');
+  }
   if(Math.min(roadLayout(c).leftShoulder,roadLayout(c).rightShoulder)<-.0001) throw Error('Lanes, median and sidewalks exceed the deck width; reduce them or widen the deck.');
   if(c.curved && totalLength(c)/c.radius>2.2) throw Error('Increase the curve radius: total turning angle must stay below 126 degrees.');
   if(c.width*Math.abs(Math.tan(rad(c.skew)))>Math.min(...c.spans.map(s=>s.length))*.85) throw Error('Skew is too large for the span length and deck width.');
@@ -162,13 +182,14 @@ export function decodeConfig(hash) {
 
 export function vehicleFits(c,s,u,halfLength,halfWidth){
   const f=frame(c,s,u),layout=roadLayout(c),L=totalLength(c);
+  const lane=layout.laneCenters.reduce((a,b)=>Math.abs(a-u)<Math.abs(b-u)?a:b),laneMin=lane-c.laneWidth/2,laneMax=lane+c.laneWidth/2;
   for(const dx of [-halfLength,0,halfLength]){
    const extents=[];
    for(const du of [-halfWidth,halfWidth]){
     const x=f.x+dx*f.tx+du*f.nx,z=f.z+dx*f.tz+du*f.nz;
     const q=alignmentStation(c,x,z);
     const centre=frame(c,q),across=(x-centre.x)*centre.nx+(z-centre.z)*centre.nz;
-    if(across<layout.roadMin+.08||across>layout.roadMax-.08)return false;
+    if(across<Math.max(layout.roadMin+.08,laneMin+.04)||across>Math.min(layout.roadMax-.08,laneMax-.04))return false;
     extents.push(across);
     const start=supportStation(c,0,across)-c.approach-18,end=supportStation(c,L,across)+c.approach+18;
     if(q<start||q>end)return false;

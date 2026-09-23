@@ -1,5 +1,8 @@
 import * as T from 'three';
 import {mergeGeometries} from './vendor/BufferGeometryUtils.js';
+import {createVehicleModel,vehicleDimensions,vehicleKinds} from './vehicles.mjs';
+import {makeTrain,kenneyGeometry,kenneySize,buildingStyles} from './kenney-scene.mjs';
+export {vehicleKinds} from './vehicles.mjs';
 import {frame,profile,totalLength,stations,spacing,supportStation,girderTop,girderDepth,waterGroups,roadLayout,terrainBase,laneForward,steelFinishes,vehicleFits} from './geometry.mjs';
 
 export function makeMaterials(onLoad=()=>{}) {
@@ -9,8 +12,8 @@ export function makeMaterials(onLoad=()=>{}) {
   if(typeof document!=='undefined'){
     const loader=new T.TextureLoader();
     const load=(file,color=false)=>{const t=loader.load(`./textures/${file}`,onLoad,undefined,()=>console.warn(`Could not load ${file}`));t.wrapS=t.wrapT=T.RepeatWrapping;t.anisotropy=8;if(color)t.colorSpace=T.SRGBColorSpace;return t;};
-    for(const [key,file,size,normal] of [['asphalt','asphalt_4k.webp',4.5,'asphalt_01_nor_gl.webp'],['concrete','concrete_4k.webp',3.5,'concrete_wall_009_nor_gl.webp'],['grass','meadow-v2.webp',3,'']]){
-      m[key].map=load(file,true);m[key].color.set(key==='grass'?'#94b69b':key==='concrete'?'#999b94':'#687176');m[key].userData.textureMetres=size;
+    for(const [key,file,size,normal] of [['asphalt','asphalt_4k.webp',4.5,'asphalt_01_nor_gl.webp'],['concrete','concrete_4k.webp',3.5,'concrete_wall_009_nor_gl.webp'],['grass','meadow-v2.webp',1.6,'']]){
+      m[key].map=load(file,true);m[key].color.set(key==='grass'?'#dce7c9':key==='concrete'?'#999b94':'#687176');m[key].userData.textureMetres=size;
       if(normal){m[key].normalMap=load(normal);m[key].normalScale.setScalar(key==='asphalt'?.32:.24);}
     }
     m.edge.map=m.concrete.map;m.edge.normalMap=m.concrete.normalMap;m.edge.normalScale.setScalar(.25);m.edge.userData.textureMetres=3.5;
@@ -23,8 +26,52 @@ export function makeMaterials(onLoad=()=>{}) {
     }
     m.building.map=m.concrete.map.clone();m.building.map.repeat.set(3,3);m.building.color.set('#c6c0b4');
     m.glass.color.set('#546774');m.glass.roughness=.22;m.roof.color.set('#656561');m.truck.color.set('#b49062');
+    for(const kit of ['train','suburban','commercial']){
+      const atlas=loader.load(`./models/${kit}-colormap.webp`,onLoad);
+      atlas.colorSpace=T.SRGBColorSpace;atlas.magFilter=T.NearestFilter;
+      m[kit]=new T.MeshStandardMaterial({map:atlas,roughness:kit==='train'?.48:.84,metalness:kit==='train'?.13:0});
+    }
   }
-  m.water=material('#385d59',.42,0);m.water.userData.flowTime={value:0};m.foam=new T.LineBasicMaterial({color:'#d8f1df',transparent:true,opacity:.16});
+  m.grass.roughness=1;m.grass.bumpMap=m.grass.map;m.grass.bumpScale=.055;
+  m.grass.onBeforeCompile=shader=>{
+    shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 meadowPosition;').replace('#include <begin_vertex>','#include <begin_vertex>\nmeadowPosition=(modelMatrix*vec4(transformed,1.)).xyz;');
+    shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
+varying vec3 meadowPosition;
+float meadowHash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float meadowNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(meadowHash(i),meadowHash(i+vec2(1,0)),f.x),mix(meadowHash(i+vec2(0,1)),meadowHash(i+vec2(1,1)),f.x),f.y);}`)
+      .replace('#include <map_fragment>',`#ifdef USE_MAP
+vec2 grassUV=meadowPosition.xz/4.;
+vec4 grassA=texture2D(map,grassUV),grassB=texture2D(map,mat2(.8,-.6,.6,.8)*grassUV+vec2(17.3,9.7));
+diffuseColor*=mix(grassA,grassB,smoothstep(.25,.75,meadowNoise(meadowPosition.xz*.16)));
+#endif`)
+      .replace('#include <color_fragment>','#include <color_fragment>\nfloat meadowPatch=meadowNoise(meadowPosition.xz*.055);diffuseColor.rgb*=mix(vec3(.72,.91,.78),vec3(1.10,1.15,1.03),meadowPatch);');
+  };
+  m.snow=material('#d3dfe0',1);
+  m.snow.onBeforeCompile=shader=>{
+    shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 snowPosition;').replace('#include <begin_vertex>','#include <begin_vertex>\nsnowPosition=(modelMatrix*vec4(transformed,1.)).xyz;');
+    shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nvarying vec3 snowPosition;').replace('#include <color_fragment>','#include <color_fragment>\nfloat snowGrain=fract(sin(dot(floor(snowPosition.xz*7.),vec2(127.1,311.7)))*43758.5453);float drift=sin(snowPosition.x*.22)*sin(snowPosition.z*.16);diffuseColor.rgb*=.90+.07*drift+.08*snowGrain;');
+  };
+  for(const [key,snowKey] of [['tree','treeSnow'],['treeLight','treeLightSnow']]){
+    m[snowKey]=m[key].clone();
+    m[snowKey].onBeforeCompile=shader=>{shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>','#include <color_fragment>\ndiffuseColor.rgb=mix(diffuseColor.rgb,vec3(.66,.77,.72),.55);');};
+  }
+  // Weathering is sampled in metres; painted finishes keep their selected colour.
+  m.steel.userData.weathered={value:0};
+  m.steel.onBeforeCompile=shader=>{
+    shader.uniforms.weathered=m.steel.userData.weathered;
+    shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 steelPosition;').replace('#include <begin_vertex>','#include <begin_vertex>\nsteelPosition=(modelMatrix*vec4(transformed,1.)).xyz;');
+    shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
+uniform float weathered;varying vec3 steelPosition;
+float steelHash(vec3 p){return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5453);}
+float steelNoise(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(mix(steelHash(i),steelHash(i+vec3(1,0,0)),f.x),mix(steelHash(i+vec3(0,1,0)),steelHash(i+vec3(1,1,0)),f.x),f.y),mix(mix(steelHash(i+vec3(0,0,1)),steelHash(i+vec3(1,0,1)),f.x),mix(steelHash(i+vec3(0,1,1)),steelHash(i+vec3(1,1,1)),f.x),f.y),f.z);}`)
+      .replace('#include <color_fragment>','#include <color_fragment>\nfloat patina=steelNoise(steelPosition*vec3(2.,.42,2.));float rustGrain=steelNoise(steelPosition*35.);vec3 weathering=mix(vec3(.55,.40,.31),vec3(1.13,.94,.68),patina)*(.91+.18*rustGrain);diffuseColor.rgb*=mix(vec3(1.),weathering,weathered);');
+  };
+  m.water=material('#d8eeec',.28,.04);m.water.userData.flowTime={value:0};m.foam=new T.LineBasicMaterial({color:'#d8f1df',transparent:true,opacity:.16});
+  if(typeof document!=='undefined'){
+    const loader=new T.TextureLoader();
+    m.water.map=loader.load('./textures/river-water.webp',onLoad);m.water.map.colorSpace=T.SRGBColorSpace;m.water.map.wrapS=m.water.map.wrapT=T.RepeatWrapping;m.water.map.repeat.set(.09,.18);m.water.map.anisotropy=8;
+    m.water.normalMap=loader.load('./textures/river-normal.webp',onLoad);m.water.normalMap.wrapS=m.water.normalMap.wrapT=T.RepeatWrapping;m.water.normalMap.repeat.set(.13,.25);m.water.normalScale.set(.27,.27);
+  }
   m.water.onBeforeCompile=shader=>{
     shader.uniforms.flowTime=m.water.userData.flowTime;
     shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec2 riverPosition;').replace('#include <begin_vertex>','#include <begin_vertex>\nriverPosition=uv;');
@@ -55,10 +102,11 @@ export function nebtSection(h) {
 export function steelSection(h,w) {
   return [[-.25,0],[.25,0],[.25,-.05],[w/2,-.05],[w/2,-h+.05],[.25,-h+.05],[.25,-h],[-.25,-h],[-.25,-h+.05],[-w/2,-h+.05],[-w/2,-.05],[-.25,-.05]];
 }
-export function boxSection(h,top,plate=.05,web=.014) {
-  const bottom=top-h/2;
-  if(bottom<=2*plate+web)return null;
-  return {top:[[-top/2,0],[top/2,0],[top/2,-plate],[-top/2,-plate]],bottom:[[-bottom/2,-h+plate],[bottom/2,-h+plate],[bottom/2,-h],[-bottom/2,-h]],left:[[-top/2,0],[-top/2+web,0],[-bottom/2+web,-h],[-bottom/2,-h]],right:[[bottom/2, -h],[bottom/2-web,-h],[top/2-web,0],[top/2,0]]};
+export function boxSection(h,top,bottom=top-h/2,plate=.05,web=.014) {
+  // Shift web attachment inside either flange as needed; each web still inclines 1H:4V.
+  const topWeb=Math.min(top/2-.07,bottom/2+h/4-.07),bottomWeb=topWeb-h/4;
+  if(bottomWeb<=web+.05)return null;
+  return {top:[[-top/2,0],[top/2,0],[top/2,-plate],[-top/2,-plate]],bottom:[[-bottom/2,-h+plate],[bottom/2,-h+plate],[bottom/2,-h],[-bottom/2,-h]],left:[[-topWeb,0],[-topWeb+web,0],[-bottomWeb+web,-h],[-bottomWeb,-h]],right:[[bottomWeb,-h],[bottomWeb-web,-h],[topWeb-web,0],[topWeb,0]]};
 }
 const rect=(a,b,top,bottom)=>[[a,top],[b,top],[b,bottom],[a,bottom]];
 
@@ -93,7 +141,7 @@ export function boxGirder(c,a,b,u,mat){
   for(const plate of ['top','bottom','left','right']){
     const section=station=>{
       const d=girderDepth(c,supportStation(c,station,u),u);
-      return boxSection(d,c.boxTopWidth,.05,c.web)[plate].map(([x,y])=>[x+u,y]);
+      return boxSection(d,c.boxTopWidth,c.boxBottomWidth,.05,c.web)[plate].map(([x,y])=>[x+u,y]);
     };
     const mesh=sweep(c,a,b,section,mat,(_,s)=>girderTop(c,0,s));mesh.name='Box '+plate;group.add(mesh);
   }
@@ -123,82 +171,42 @@ function beam(parent,mat,a,b,w,d){
 }
 function point(c,s,u,y){const f=frame(c,s,u);return [f.x,y,f.z];}
 function supportPoint(c,s,u,y){return point(c,supportStation(c,s,u),u,y);}
-export const vehicleKinds=['sedan','suv','hatchback','pickup','van','truck','semi'];
+function bracingMember(parent,mat,a,b){
+  const shape=new T.Shape();shape.moveTo(-.065,-.065);for(const [x,y] of [[.065,-.065],[.065,-.052],[-.052,-.052],[-.052,.065],[-.065,.065]])shape.lineTo(x,y);shape.closePath();
+  const start=new T.Vector3(...a),direction=new T.Vector3(...b).sub(start),geometry=new T.ExtrudeGeometry(shape,{depth:direction.length(),bevelEnabled:false,steps:1,curveSegments:1});
+  const member=new T.Mesh(geometry,mat);member.position.copy(start);member.quaternion.setFromUnitVectors(new T.Vector3(0,0,1),direction.normalize());member.castShadow=member.receiveShadow=true;member.name='Steel angle brace';parent.add(member);
+}
 export function vehicle(parent,m,c,s,u,type,forward=true,road){
   if(!c.showTraffic)return;
   if(type==='car')type='sedan';
-  const truck=type==='truck'||type==='semi',semi=type==='semi',van=type==='van',pickup=type==='pickup',suv=type==='suv',hatch=type==='hatchback';
-  const length=semi?12:truck?8:van?5.6:pickup?5.5:hatch?4.1:suv?4.8:4.6,width=truck?2.4:van?2.1:pickup||suv?2:1.85;
-  const halfLength=length/2+.1,halfWidth=truck?1.47:width/2+.2;
-  if(road){if(Math.abs(u)+halfWidth>road.width/2-.2)return;}
-  else if(!vehicleFits(c,s,u,halfLength,halfWidth))return;
-  const f=road?{x:road.x+road.dx*s+road.nx*u,z:road.z+road.dz*s+road.nz*u,tx:road.dx,tz:road.dz}:frame(c,s,u);
-  const group=new T.Group(),paint=m['paint'+(Math.abs(Math.floor(s*3+u*7+c.seed))%7)];
-  group.name=type;group.position.set(f.x,(road?road.elevation:profile(c,s))+.035,f.z);group.rotation.y=-Math.atan2(f.tz,f.tx)+(forward?0:Math.PI);
-  const part=(mat,x,y,z,w,h,d)=>box(group,mat,x,y,z,w,h,d);
-  const shell=(mat,outline,depth)=>{
-    const shape=new T.Shape();outline.forEach(([x,y],i)=>i?shape.lineTo(x,y):shape.moveTo(x,y));shape.closePath();
-    const g=new T.ExtrudeGeometry(shape,{depth,bevelEnabled:true,bevelSize:.035,bevelThickness:.035,bevelSegments:1,steps:1,curveSegments:1});g.translate(0,0,-depth/2);
-    const mesh=new T.Mesh(g,mat);mesh.castShadow=mesh.receiveShadow=true;group.add(mesh);
-  };
-  let axles,radius;
-  if(truck){
-    const cabX=length/2-1.15,cargoLength=semi?8:5.4,cargoX=semi?-1.6:-1.15;
-    part(m.dark,0,.65,0,length-.2,.25,2);
-    part(m.edge,cargoX,2.15,0,cargoLength,2.65,2.4);
-    shell(paint,[[cabX-1,.6],[cabX+1,.6],[cabX+1,2.15],[cabX+.65,2.65],[cabX-.85,2.65],[cabX-1,2.25]],2.35);
-    part(m.glass,cabX+.98,2.05,0,.04,.62,2.06);
-    part(m.dark,cabX+1.01,1.12,0,.04,.45,1.4);
-    for(const side of [-1,1]){
-      part(m.glass,cabX+.08,2.14,side*1.18,1.45,.62,.03);
-      part(m.railing,cabX-.1,.68,side*1.22,1.45,.16,.3);
-      part(m.dark,cabX+.75,1.92,side*1.36,.16,.4,.18);
-      part(paint,cargoX,1.35,side*1.205,cargoLength-.1,.17,.025);
-      for(let x=cargoX-cargoLength/2+.4;x<cargoX+cargoLength/2;x+=.7)part(m.railing,x,2.23,side*1.204,.023,2.28,.018);
-    }
-    part(m.dark,cargoX-cargoLength/2-.012,2.08,0,.035,2.4,.045);
-    if(semi)part(m.dark,2.1,1.0,0,1.05,.18,1.8);
-    axles=semi?[-4.9,-3.9,2.5,4.7]:[-3,-2,2.9];radius=.46;
-  }else{
-    const half=length/2,bodyTop=van?1.1:pickup||suv?.95:.82,roof=van?2.48:suv?1.88:pickup?1.8:hatch?1.55:1.5;
-    shell(paint,[[-half,.4],[-half,bodyTop-.13],[-half+.3,bodyTop],[half-.42,bodyTop],[half,bodyTop-.18],[half,.42]],width);
-    const rear=van?-2.45:pickup?-.15:hatch?-1.55:suv?-1.65:-1.4,front=van?1.85:pickup?1.8:1.25;
-    shell(m.glass,[[rear,bodyTop],[front,bodyTop],[front-.55,roof-.08],[rear+.3,roof-.08]],width-.16);
-    part(paint,(rear+front-.25)/2,roof,0,front-rear-.85,.08,width-.17);
-    for(const side of [-1,1]){
-      part(paint,(rear+front)/2,bodyTop+.035,side*(width-.1)/2,front-rear,.09,.055);
-      for(const x of [rear+.35,(rear+front)/2,front-.58])part(paint,x,(roof+bodyTop)/2,side*(width-.1)/2,.075,roof-bodyTop,.045);
-      part(m.dark,front-.2,bodyTop+.18,side*(width/2+.10),.24,.15,.18);
-      part(m.railing,front-.7,bodyTop-.1,side*(width/2+.04),.21,.035,.026);
-      part(m.dark,0,.37,side*(width/2-.02),length-.45,.12,.05);
-    }
-    if(pickup){
-      part(m.dark,-1.55,.83,0,1.8,.05,width-.28);
-      for(const side of [-1,1])part(paint,-1.6,1.02,side*(width/2-.08),1.9,.34,.16);
-      part(paint,-half+.08,1.02,0,.16,.34,width);
-    }
-    if(van){for(const side of [-1,1])part(paint,-1.5,1.67,side*(width-.1)/2,1.7,1.03,.045);}
-    part(m.dark,half+.012,bodyTop-.22,0,.035,.19,width*.48);
-    part(m.railing,half+.025,.43,0,.035,.08,width*.8);
-    axles=[-length*.30,length*.30];radius=van||pickup||suv?.38:.32;
-  }
-  const front=length/2+.025,rear=-length/2-.025;
-  for(const side of [-1,1]){
-    part(m.white,front,.74,side*width*.36,.045,.15,width*.23);
-    part(m.vehicle,rear,.77,side*width*.38,.045,.19,width*.18);
-    part(m.reflector,front+.01,.65,side*width*.41,.048,.045,.10);
-  }
-  for(const x of [front,rear])part(m.white,x,.49,0,.025,.10,.36);
-  for(const x of axles)for(const side of [-1,1]){
-    const wheel=new T.Mesh(new T.CylinderGeometry(radius,radius,.25,20),m.wheel);wheel.rotation.x=Math.PI/2;wheel.position.set(x,radius,side*width/2);group.add(wheel);
-    const hub=new T.Mesh(new T.CylinderGeometry(radius*.62,radius*.62,.262,12),m.railing);hub.rotation.x=Math.PI/2;hub.position.copy(wheel.position);group.add(hub);
-    const centre=new T.Mesh(new T.CylinderGeometry(radius*.19,radius*.19,.273,10),m.dark);centre.rotation.x=Math.PI/2;centre.position.copy(wheel.position);group.add(centre);
-    for(let i=0;i<5;i++){const spoke=part(m.dark,x,radius,side*(width/2+.138),radius*.9,.035,.012);spoke.rotation.z=i*Math.PI/5;}
-  }
-  group.rotation.z=Math.atan(road?0:(profile(c,s+.1)-profile(c,s-.1))/.2)*(forward?1:-1);
-  parent.userData.vehicles??=[];parent.userData.vehicles.push({s,u,type,forward,road:!!road,halfLength,halfWidth});
+  let dimensions=vehicleDimensions(type);
+  const fits=d=>road?Math.abs(u)+d.halfWidth<=road.width/2-.2:vehicleFits(c,s,u,d.halfLength,d.halfWidth);
+  if(!fits(dimensions)){type='sedan';dimensions=vehicleDimensions(type);if(!fits(dimensions))return;}
+  const group=createVehicleModel(type,m['paint'+(Math.abs(Math.floor(s*3+u*7+c.seed))%7)],m);
+  const route={s,u,type,forward,road:road??null,halfLength:dimensions.halfLength,halfWidth:dimensions.halfWidth};
+  group.userData.route=route;positionVehicle(group,c);
+  parent.userData.vehicles??=[];parent.userData.vehicles.push({...route,road:!!road});
   let traffic=parent.children.find(o=>o.name==='Traffic');if(!traffic){traffic=new T.Group();traffic.name='Traffic';parent.add(traffic);}
-  group.updateMatrixWorld(true);for(const child of [...group.children]){child.applyMatrix4(group.matrix);traffic.add(child);}
+  traffic.add(group);return group;
+}
+function positionVehicle(group,c){
+  const {s,u,forward,road,halfLength,halfWidth,verticalOffset=0}=group.userData.route;
+  const f=road?{x:road.x+road.dx*s+road.nx*u,z:road.z+road.dz*s+road.nz*u,tx:road.dx,tz:road.dz}:frame(c,s,u);
+  group.position.set(f.x,(road?road.elevation:profile(c,s))+.025+verticalOffset,f.z);
+  group.rotation.set(0,-Math.atan2(f.tz,f.tx)+(forward?0:Math.PI),Math.atan(road?0:(profile(c,s+.1)-profile(c,s-.1))/.2)*(forward?1:-1));
+  group.visible=road?(group.userData.route.type!=='train'||Math.abs(s)<=road.halfLength+halfLength):vehicleFits(c,s,u,halfLength,halfWidth);
+}
+export function animateTraffic(model,dt){
+  if(!model.config.movingTraffic||!model.config.showTraffic||!Number.isFinite(dt)||dt<=0)return;
+  const c=model.config;
+  for(const group of model.vehicles){
+    const r=group.userData.route,reach=r.road?r.road.halfLength+(r.type==='train'?r.halfLength:-r.halfLength):c.approach+17-r.halfLength;
+    const gap=r.offscreenGap??0,start=-reach-(r.forward?0:gap),end=r.road?reach+(r.forward?gap:0):totalLength(c)+reach,range=end-start;
+    if(range<=0)continue;
+    // Equal speeds preserve spacing in each lane; traffic wraps at the scenery edge.
+    r.s=start+((r.s+(r.forward?1:-1)*dt*(r.speed??30)/3.6-start)%range+range)%range;
+    positionVehicle(group,c);
+  }
 }
 
 export const guardrailSection = [[-.04,.53],[.035,.57],[.05,.62],[-.025,.68],[.05,.74],[.035,.80],[-.04,.84],[-.044,.836],[.030,.797],[.044,.741],[-.031,.680],[.044,.619],[.030,.573],[-.044,.534]];
@@ -246,16 +254,16 @@ function seeded(seed){return ()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;
 
 export function buildBridge(c,m,{batch=true}={}) {
   const fills=approachSurfaces(c);
-  m.steel.color.set(steelFinishes[c.steelColor]);m.steel.metalness=c.steelColor==='weathered'?.05:.12;m.steel.roughness=c.steelColor==='weathered'?.87:.52;
+  m.steel.color.set(steelFinishes[c.steelColor]);m.steel.metalness=c.steelColor==='weathered'?.03:.22;m.steel.roughness=c.steelColor==='weathered'?.92:c.steelColor==='green'?.38:.46;m.steel.userData.weathered.value=c.steelColor==='weathered'?1:0;
   const root=new T.Group(),deck=new T.Group(),structure=new T.Group(),setting=new T.Group();
   root.name='BridgeSketch 3D';deck.name='Deck and barriers';structure.name='Girders and supports';setting.name='Environment';root.add(deck,structure,setting);
+  const haunches=new T.Group();haunches.name='Concrete deck haunches';structure.add(haunches);
   const ss=stations(c),L=totalLength(c),half=c.width/2,gspace=spacing(c),layout=roadLayout(c),leftSide=layout.left,rightSide=layout.right,roadMin=layout.roadMin,roadMax=layout.roadMax;
   const addSweep=(group,a,b,section,mat,height,segments)=>{const o=sweep(c,a,b,section,mat,height,segments);group.add(o);return o;};
   const addMedian=(a,b)=>{
     if(!layout.medianWidth)return;
     const section=c.medianType==='barrier'?[[-.3,0],[-.3,.12],[-.16,.42],[-.12,1.1],[.12,1.1],[.16,.42],[.3,.12],[.3,0]].map(([u,y])=>[u+layout.medianCentre,y]):rect(layout.medianMin,layout.medianMax,.2,0);
     const median=addSweep(deck,a,b,section,m.concrete);median.name='Centre median';
-    for(const u of [layout.medianMin-.09,layout.medianMax+.09])addSweep(deck,a,b,rect(u-.035,u+.035,.012,.003),m.yellow);
   };
   const addBoxGirder=(group,a,b,u)=>{const box=boxGirder(c,a,b,u,m.steel);for(const mesh of [...box.children])group.add(mesh);};
   c.spans.forEach((span,i)=>{
@@ -271,10 +279,9 @@ export function buildBridge(c,m,{batch=true}={}) {
         const section=[[0,0],[-.45,0],[-.45,.10],[-.23,.35],[-.18,c.barrier],[-.02,c.barrier],[0,.15]].map(([u,v])=>[edge+side*u,v]);
         if(side<0)section.reverse();const raised=((side<0&&leftSide)||(side>0&&rightSide))?.2:0;addSweep(deck,a,b,section,m.edge,(_,s)=>profile(c,s)+raised);
       }else {const railBase=((side<0&&leftSide)||(side>0&&rightSide)) ? .2 : 0;bridgeRailing(deck,m,c,a,b,side*(half-.16),railBase);}
-      const edgeLine=side<0?roadMin+.12:roadMax-.12;addSweep(deck,a,b,rect(edgeLine-.05,edgeLine+.05,.008,.002),m.white);
     }
     addMedian(a,b);
-    for(const {u,opposing} of layout.dividers)for(let s=a+1;s<b-1;s+=6)addSweep(deck,s,Math.min(s+3,b-.1),rect(u-.035,u+.035,.011,.003),opposing?m.yellow:m.white,undefined,1);
+    for(const u of layout.laneEdges)addSweep(deck,a,b,rect(u-.05,u+.05,.011,.003),m.white);
     for(let g=0;g<(c.material==='slab'?0:c.girders);g++){
       const u=-half+c.overhang+g*gspace;
       if(!(c.continuous&&(c.material==='steel'||c.material==='box'))){
@@ -282,13 +289,24 @@ export function buildBridge(c,m,{batch=true}={}) {
       }
       // Fill from the straight girder chord to the deck profile.
       const haunchHeight=(_,s,v)=>v===0?profile(c,s)-c.asphalt-c.deck:girderTop(c,i,s)+1;
-      addSweep(structure,a+(c.continuous?0:.22),b-(c.continuous?0:.22),rect(u-(c.material==='box'?c.boxTopWidth/2:.19),u+(c.material==='box'?c.boxTopWidth/2:.19),0,-1),m.concrete,haunchHeight);
+      addSweep(haunches,a+(c.continuous?0:.22),b-(c.continuous?0:.22),rect(u-(c.material==='box'?c.boxTopWidth/2:.19),u+(c.material==='box'?c.boxTopWidth/2:.19),0,-1),m.concrete,haunchHeight);
     }
     for(let s=a+1.2;s<b&&c.material!=='slab';s+=Math.max(5,(b-a-2.4)/3))for(let g=0;g<c.girders-1;g++){
       const u=-half+c.overhang+g*gspace,top=girderTop(c,i,s)-.13,bot=top-Math.min(girderDepth(c,s,u),girderDepth(c,s,u+gspace))+.26;
       if(c.material==='steel'||c.material==='box'){
-        beam(structure,m.steel,point(c,s,u+(c.material==='box'?c.boxTopWidth/2:.1),top),point(c,s,u+gspace-(c.material==='box'?c.boxTopWidth/2:.1),bot),.085,.085);
-        beam(structure,m.steel,point(c,s,u+(c.material==='box'?c.boxTopWidth/2:.1),bot),point(c,s,u+gspace-(c.material==='box'?c.boxTopWidth/2:.1),top),.085,.085);
+        const topInset=c.material==='box'?c.boxTopWidth/2-.13/4:.06,bottomInset=c.material==='box'?c.boxTopWidth/2-(top-bot+.13)/4:.06;
+        const joints=[[u+topInset,top],[u+gspace-topInset,top],[u+bottomInset,bot],[u+gspace-bottomInset,bot]];
+        for(const [a,b,offset] of [[0,1,0],[2,3,0],[0,3,-.035],[2,1,.035]])bracingMember(structure,m.steel,point(c,s+offset,...joints[a]),point(c,s+offset,...joints[b]));
+        const f=frame(c,s);
+        for(const [k,[v,y]] of joints.entries()){
+          const side=k%2===0?1:-1,vertical=k<2?-1:1,p=point(c,s,v,y),q=point(c,s,v+side*.32,y),r=point(c,s,v,y+vertical*.3),positions=[];
+          for(const t of [-.018,.018])for(const a of [p,q,r])positions.push(a[0]+f.tx*t,a[1],a[2]+f.tz*t);
+          const plate=new T.BufferGeometry();plate.setAttribute('position',new T.Float32BufferAttribute(positions,3));plate.setIndex([0,2,1,3,4,5,0,1,4,0,4,3,1,2,5,1,5,4,2,0,3,2,3,5]);plate.computeVertexNormals();
+          const mesh=new T.Mesh(plate,m.steel);mesh.castShadow=mesh.receiveShadow=true;mesh.name='Bracing gusset';structure.add(mesh);
+          for(const [dv,dy] of [[.07,.06],[.19,.045],[.05,.18]]){
+            const p=point(c,s,v+side*dv,y+vertical*dy),bolt=new T.Mesh(new T.CylinderGeometry(.023,.023,.052,6),m.dark);bolt.position.set(...p);bolt.quaternion.setFromUnitVectors(new T.Vector3(0,1,0),new T.Vector3(f.tx,0,f.tz));bolt.name='Gusset bolt';structure.add(bolt);
+          }
+        }
       }else beam(structure,m.concrete,point(c,s,u,top-c.depth*.4),point(c,s,u+gspace,top-c.depth*.4),.25,c.depth*.52);
     }
     if(c.showTraffic)layout.laneCenters.forEach((u,lane)=>{
@@ -318,8 +336,8 @@ export function buildBridge(c,m,{batch=true}={}) {
       wallBetween(structure,m.concrete,supportPoint(c,s,-half+.15,0),supportPoint(c,s,half-.15,0),c.wallThickness,earth,top);
       wallBetween(structure,m.concrete,supportPoint(c,s,-half+.15,0),supportPoint(c,s,half-.15,0),1.9,top-.4,top);
     }else{
-      const capHeight=c.pierType==='hammerhead'?c.hammerheadThickness:1;
-      wallBetween(structure,m.concrete,supportPoint(c,s,-half+.15,0),supportPoint(c,s,half-.15,0),1.9,top-capHeight,top);
+      const capHeight=c.pierType==='hammerhead'?c.hammerheadThickness:c.bentThickness;
+      const cap=wallBetween(structure,m.concrete,supportPoint(c,s,-half+.15,0),supportPoint(c,s,half-.15,0),c.pierType==='bent'?c.bentWidth:1.9,top-capHeight,top);cap.name='Pier cap';
       const us=c.pierType==='hammerhead'||c.columns===1?[0]:Array.from({length:c.columns},(_,n)=>-c.width*.32+n*c.width*.64/(c.columns-1));
       for(const u of us){
         const f=supportBasis(c,s,u),height=top-capHeight-earth;
@@ -351,14 +369,14 @@ export function buildBridge(c,m,{batch=true}={}) {
     addSweep(deck,a,b,rect(-half,half,0,-.17),m.asphalt);
     if(leftSide)addSweep(deck,a,b,rect(-half,roadMin,.2,0),m.concrete);
     if(rightSide)addSweep(deck,a,b,rect(roadMax,half,.2,0),m.concrete);
-    for(const u of [roadMin,roadMax])addSweep(deck,a,b,rect(u-.055,u+.055,.009,.002),m.white);
+    for(const u of layout.laneEdges)addSweep(deck,a,b,rect(u-.05,u+.05,.011,.003),m.white);
     addMedian(a,b);
-    for(const {u,opposing} of layout.dividers)for(let s=a+1;s<b-1;s+=6)addSweep(deck,s,Math.min(b-.1,s+3),rect(u-.035,u+.035,.012,.003),opposing?m.yellow:m.white,undefined,1);
     for(const u of [-half+.05,half-.05])roadsideGuardrail(deck,m,c,a,b,u);
   }
   const waters=addEnvironment(c,m,setting,fills);
-  if(batch)for(const group of [deck,structure,setting]){for(const child of group.children)if(child.name==='Traffic')batchMeshes(child);batchMeshes(group);}
-  return {root,deck,structure,setting,waters,traffic:deck.children.find(o=>o.name==='Traffic'),config:c};
+  const vehicles=[deck,setting].flatMap(group=>group.children.find(o=>o.name==='Traffic')?.children??[]);
+  if(batch){for(const vehicle of vehicles)batchMeshes(vehicle);for(const group of [deck,haunches,structure,setting])batchMeshes(group);}
+  return {root,deck,structure,haunches,setting,waters,vehicles,traffic:deck.children.find(o=>o.name==='Traffic'),config:c};
 }
 
 function crossing(c,s,angle,width,elevation,type){
@@ -472,15 +490,36 @@ export function intersectsRoad(polygons,x,z,radius=0){
     }if(inside)return true;
   }return false;
 }
+// Reserve the whole strip between adjacent road/rail crossings, including
+// differently angled crossings and curved bridge alignments.
+export function crossingCorridors(c,extent=totalLength(c)+2*c.approach+36,halfZ=c.sceneWidth/2){
+  const ss=stations(c),strips=c.spans.flatMap((span,i)=>{
+    if(span.obstacle==='water')return [];
+    const o=crossing(c,(ss[i]+ss[i+1])/2,span.angle,span.width,span.elevation,span.obstacle),reach=Math.hypot(extent,2*halfZ);
+    let polygon=[[-reach,-1],[reach,-1],[reach,1],[-reach,1]].map(([s,side])=>{const p=world(o,s,side*(o.width/2+2),0);return {x:p[0],z:p[2]};});
+    for(const [axis,limit,sign] of [['x',extent/2,1],['x',-extent/2,-1],['z',halfZ,1],['z',-halfZ,-1]]){
+      const out=[];for(let j=0;j<polygon.length;j++){const a=polygon[j],b=polygon[(j+1)%polygon.length],da=sign*(a[axis]-limit),db=sign*(b[axis]-limit);if(da<=0)out.push(a);if((da<=0)!==(db<=0)){const t=da/(da-db);out.push({x:a.x+(b.x-a.x)*t,z:a.z+(b.z-a.z)*t});}}polygon=out;
+    }
+    return [polygon];
+  }),zones=[];
+  for(let i=0;i<strips.length-1;i++){
+    const points=[...strips[i],...strips[i+1]].sort((a,b)=>a.x-b.x||a.z-b.z),cross=(a,b,c)=>(b.x-a.x)*(c.z-a.z)-(b.z-a.z)*(c.x-a.x),lower=[],upper=[];
+    for(const p of points){while(lower.length>1&&cross(lower.at(-2),lower.at(-1),p)<=0)lower.pop();lower.push(p);}
+    for(const p of [...points].reverse()){while(upper.length>1&&cross(upper.at(-2),upper.at(-1),p)<=0)upper.pop();upper.push(p);}
+    const p=[...lower.slice(0,-1),...upper.slice(0,-1)];if(p.length<3)continue;
+    zones.push({p,minX:Math.min(...p.map(v=>v.x)),maxX:Math.max(...p.map(v=>v.x)),minZ:Math.min(...p.map(v=>v.z)),maxZ:Math.max(...p.map(v=>v.z))});
+  }
+  return zones;
+}
 function addEnvironment(c,m,parent,fills){
-  const L=totalLength(c),ss=stations(c),points=fills.flat(),extent=Math.max(L+2*c.approach+36,...points.map(p=>2*Math.abs(p[0])+8)),halfZ=Math.max(55,...points.map(p=>Math.abs(p[2])+8)),rng=seeded(c.seed),obstacles=[],waters=[];
+  const L=totalLength(c),ss=stations(c),points=fills.flat(),extent=Math.max(L+2*c.approach+36,...points.map(p=>2*Math.abs(p[0])+8)),halfZ=Math.max(c.sceneWidth/2,...points.map(p=>Math.abs(p[2])+8)),rng=seeded(c.seed),obstacles=[],waters=[],ground=c.terrainMode==='snow'?m.snow:m.grass,riverReach=Math.hypot(extent/2,halfZ)+8,riverSteps=Math.ceil(riverReach);
   const fillPos=[];
   for(const p of fills)for(let i=1;i<p.length-1;i++){
     const a=p[0],b=p[i],d=p[i+1],up=(b[2]-a[2])*(d[0]-a[0])-(b[0]-a[0])*(d[2]-a[2]);
     fillPos.push(...a,...(up>=0?b:d),...(up>=0?d:b));
   }
   const fillGeometry=new T.BufferGeometry();fillGeometry.setAttribute('position',new T.Float32BufferAttribute(fillPos,3));fillGeometry.computeVertexNormals();
-  const fill=new T.Mesh(fillGeometry,m.grass);fill.name='2H:1V approach fills and quarter cones';fill.receiveShadow=true;fill.castShadow=true;parent.add(fill);
+  const fill=new T.Mesh(fillGeometry,ground);fill.name='2H:1V approach fills and quarter cones';fill.receiveShadow=true;fill.castShadow=true;parent.add(fill);
   c.spans.forEach((s,i)=>{if(s.obstacle!=='water')obstacles.push(crossing(c,(ss[i]+ss[i+1])/2,s.angle,s.width,s.elevation,s.obstacle));});
   for(const g of waterGroups(c)){
     const first=c.spans[g.startIndex],last=c.spans[g.endIndex];
@@ -488,8 +527,8 @@ function addEnvironment(c,m,parent,fills){
     const width=g.startIndex===g.endIndex?Math.min(first.width,first.length-2):(end-start)*Math.sin(g.angle*Math.PI/180);
     const o=crossing(c,(start+end)/2,g.angle,width,g.elevation,'water');obstacles.push(o);
     const pos=[],indices=[],uv=[];
-    for(let j=0;j<=60;j++)for(const side of [-1,1]){const along=-64+j*128/60;pos.push(...world(o,along,side*width/2+riverWiggle(along),g.elevation));uv.push(j/60,(side+1)/2);}
-    for(let j=0;j<60;j++){const k=j*2;indices.push(k,k+1,k+2,k+1,k+3,k+2);}
+    for(let j=0;j<=riverSteps;j++)for(const side of [-1,1]){const along=-riverReach+j*2*riverReach/riverSteps;pos.push(...world(o,along,side*width/2+riverWiggle(along),g.elevation));uv.push(j/riverSteps,(side+1)/2);}
+    for(let j=0;j<riverSteps;j++){const k=j*2;indices.push(k,k+1,k+2,k+1,k+3,k+2);}
     const clipped=[];
     // Clip the river to the terrain boundary so no floating surface extends beyond the landscape.
     for(let i=0;i<indices.length;i+=3){
@@ -503,18 +542,20 @@ function addEnvironment(c,m,parent,fills){
   }
   const terrainHeight=terrainSampler(c);
   const terrainGeo=new T.PlaneGeometry(extent,halfZ*2,Math.min(240,Math.ceil(extent/1.2)),Math.ceil(halfZ*2/1.2));terrainGeo.rotateX(-Math.PI/2);const terrainPos=terrainGeo.attributes.position;
-  for(let i=0;i<terrainPos.count;i++)terrainPos.setY(i,terrainHeight(terrainPos.getX(i),terrainPos.getZ(i)));terrainGeo.computeVertexNormals();const terrain=new T.Mesh(terrainGeo,m.grass);terrain.receiveShadow=true;parent.add(terrain);
+  for(let i=0;i<terrainPos.count;i++)terrainPos.setY(i,terrainHeight(terrainPos.getX(i),terrainPos.getZ(i)));terrainGeo.computeVertexNormals();const terrain=new T.Mesh(terrainGeo,ground);terrain.name='Terrain surface';terrain.receiveShadow=true;parent.add(terrain);
   // Border skirt follows the terrain edge, keeping the diorama watertight visually.
   const base=Math.min(-1.5,...c.spans.map(s=>s.elevation-1.5));
   for(const z of [-halfZ,halfZ])for(let x=-extent/2;x<extent/2;x+=2){const w=Math.min(2,extent/2-x),y=terrainHeight(x+w/2,z);box(parent,m.earth,x+w/2,(y+base)/2,z,w,y-base,.25);}
   for(const x of [-extent/2,extent/2])for(let z=-halfZ;z<halfZ;z+=2){const d=Math.min(2,halfZ-z),y=terrainHeight(x,z+d/2);box(parent,m.earth,x,(y+base)/2,z+d/2,.25,y-base,d);}
   box(parent,m.earth,0,base-.2,0,extent,.4,halfZ*2);
+  let railIndex=0;
   for(const o of obstacles.filter(o=>o.type!=='water')){
     const halfLength=Math.max(1,Math.min(halfZ+10,(extent/2-Math.abs(o.x)-Math.abs(o.nx)*o.width/2)/Math.max(.001,Math.abs(o.dx)),(halfZ-Math.abs(o.z)-Math.abs(o.nz)*o.width/2)/Math.max(.001,Math.abs(o.dz))));
+    o.halfLength=halfLength;
     const basePos=world(o,0,0,o.elevation-.1);box(parent,o.type==='road'?m.asphalt:m.sand,...basePos,2*halfLength,.2,o.width,o.yaw);
     if(o.type==='road'){
       for(const side of [-1,1])box(parent,m.white,...world(o,0,side*(o.width/2-.3),o.elevation+.013),2*halfLength,.018,.10,o.yaw);
-      for(let t=-halfLength+2;t<halfLength-2;t+=6)box(parent,m.yellow,...world(o,t,0,o.elevation+.016),3,.02,.10,o.yaw);
+      box(parent,m.white,...world(o,0,0,o.elevation+.016),2*halfLength,.02,.10,o.yaw);
       roadsideGuardrail(parent,m,c,-halfLength,halfLength,o.width/2+.35,o);roadsideGuardrail(parent,m,c,-halfLength,halfLength,-o.width/2-.35,o);
       if(c.showTraffic&&o.width>=6.4)for(const t of [-halfLength*.6,halfLength*.6])vehicle(parent,m,c,t,(t<0?1:-1)*o.width/4,t<0?'car':'truck',t<0,o);
     }else{
@@ -523,50 +564,65 @@ function addEnvironment(c,m,parent,fills){
         for(let t=-halfLength+.2;t<halfLength-.2;t+=.7)box(parent,m.trunk,...world(o,t,offset,o.elevation+.06),.22,.12,2.5,o.yaw);
         for(const side of [-.7175,.7175])box(parent,m.dark,...world(o,0,offset+side,o.elevation+.16),2*halfLength,.16,.08,o.yaw);
       }
+      if(c.showTraffic){
+        let traffic=parent.children.find(child=>child.name==='Traffic');if(!traffic){traffic=new T.Group();traffic.name='Traffic';parent.add(traffic);}
+        const index=(railIndex+c.seed)%tracks.length,style=c.trainStyle==='mixed'?['diesel','bullet','city'][(railIndex+c.seed)%3]:c.trainStyle;
+        const carCount=4+Math.floor(seeded(c.seed+railIndex*1009+137)()*9);
+        const train=makeTrain(style,m.train,carCount),forward=(railIndex+c.seed)%2===0;
+        train.userData.route={s:(forward?-.33:.33)*halfLength,u:tracks[index],type:'train',forward,road:o,halfLength:train.userData.length/2,halfWidth:train.userData.width/2,verticalOffset:.22,speed:48,offscreenGap:40};
+        positionVehicle(train,c);traffic.add(train);
+      }
+      railIndex++;
     }
   }
-  const roadZones=roadFootprints(c,fills);
+  const roadZones=roadFootprints(c,fills),corridorZones=crossingCorridors(c,extent,halfZ);
   const occupied=(x,z,margin=2)=>{
     for(const o of obstacles){const p=coordinates(o,x,z);if(Math.abs(p.across-(o.type==='water'?riverWiggle(p.along):0))<o.width/2+margin)return true;}
     return intersectsRoad(roadZones,x,z,margin);
   };
   const trees=[];
   for(let i=0;i<2400&&c.environment==='rural'&&trees.length<220;i++){
-    const x=(rng()-.5)*(extent-12),z=(rng()-.5)*98,scale=1.1+rng()*1.5;
-    if(!occupied(x,z,scale*3.5+1))trees.push({x,z,y:terrainHeight(x,z),scale,rotation:rng()*Math.PI});
+    const x=(rng()-.5)*(extent-12),z=(rng()-.5)*(2*halfZ-12),scale=1.1+rng()*1.5,radius=scale*3.5+1;
+    if(!occupied(x,z,radius)&&!intersectsRoad(corridorZones,x,z,radius))trees.push({x,z,y:terrainHeight(x,z),scale,rotation:rng()*Math.PI});
   }
   const instanced=(geo,mat,items,transform)=>{if(!items.length){geo.dispose();return;}const mesh=new T.InstancedMesh(geo,mat,items.length),dummy=new T.Object3D();items.forEach((item,i)=>{transform(dummy,item);dummy.updateMatrix();mesh.setMatrixAt(i,dummy.matrix);});mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);return mesh;};
   const rocks=[];
-  for(const o of obstacles.filter(o=>o.type==='water'))for(let along=-53;along<53;along+=1.8)for(const side of [-1,1]){
+  for(const o of obstacles.filter(o=>o.type==='water'))for(let along=-riverReach;along<riverReach;along+=1.8)for(const side of [-1,1]){
     const p=world(o,along,riverWiggle(along)+side*(o.width/2+.4+rng()*1.8),0);
-    if(Math.abs(p[0])<extent/2-1&&Math.abs(p[2])<54)rocks.push({x:p[0],z:p[2],y:terrainHeight(p[0],p[2]),s:.2+rng()*.5,r:rng()*6});
+    if(Math.abs(p[0])<extent/2-1&&Math.abs(p[2])<halfZ-1)rocks.push({x:p[0],z:p[2],y:terrainHeight(p[0],p[2]),s:.2+rng()*.5,r:rng()*6});
   }
-  instanced(new T.DodecahedronGeometry(1,0),m.sand,rocks,(d,r)=>{d.position.set(r.x,r.y,r.z);d.scale.set(r.s,r.s*.45,r.s*.8);d.rotation.set(.2,r.r,.15);});
+  instanced(new T.DodecahedronGeometry(1,0),c.terrainMode==='snow'?m.snow:m.sand,rocks,(d,r)=>{d.position.set(r.x,r.y,r.z);d.scale.set(r.s,r.s*.45,r.s*.8);d.rotation.set(.2,r.r,.15);});
   instanced(new T.CylinderGeometry(.11,.16,1,6),m.trunk,trees,(d,t)=>{d.position.set(t.x,t.y+t.scale*.75,t.z);d.scale.set(t.scale,t.scale*1.5,t.scale);});
   const crowns=[];
   for(const t of trees)for(let k=0;k<4;k++){const a=t.rotation+k*1.9;beam(parent,m.trunk,[t.x,t.y+t.scale,t.z],[t.x+Math.cos(a)*t.scale*.7,t.y+t.scale*(2.1+k*.13),t.z+Math.sin(a)*t.scale*.7],.055*t.scale,.055*t.scale);}
   for(const t of trees)for(let k=0;k<9;k++){const angle=k*2.4+t.rotation,r=k===0?0:t.scale*(.35+rng()*.5);crowns.push({x:t.x+Math.cos(angle)*r,z:t.z+Math.sin(angle)*r,y:t.y+t.scale*(1.7+rng()*1.2),s:t.scale*(.45+rng()*.3),r:angle});}
   const cards=[];
   for(const t of crowns)for(let j=0;j<3;j++)cards.push({...t,angle:t.r+j*Math.PI/3,tilt:j===2?Math.PI/3:.12});
-  for(const [index,mat] of [m.tree,m.treeLight].entries()){
+  for(const [index,mat] of (c.terrainMode==='snow'?[m.treeSnow,m.treeLightSnow]:[m.tree,m.treeLight]).entries()){
     const foliage=instanced(new T.PlaneGeometry(3.2,3.2),mat,cards.filter((_,i)=>i%2===index),(d,t)=>{d.position.set(t.x,t.y,t.z);d.scale.setScalar(t.s);d.rotation.set(t.tilt,t.angle,.1);});
     if(foliage)foliage.customDepthMaterial=new T.MeshDepthMaterial({depthPacking:T.RGBADepthPacking,map:mat.map,alphaTest:.45,side:T.DoubleSide});
   }
   const grasses=[];
-  for(let i=0;i<15000;i++){const x=(rng()-.5)*(extent-4),z=(rng()-.5)*102;if(!occupied(x,z,1.2))grasses.push({x,z,y:terrainHeight(x,z),s:.15+rng()*.35,r:rng()*Math.PI});}
-  const blades=[];for(let k=0;k<5;k++){const a=k*2.4,x=Math.cos(a)*.18,z=Math.sin(a)*.18;blades.push(x-.055,0,z,x+.055,0,z,x+.13,.7+(k%3)*.14,z+.08);}
-  const tuft=new T.BufferGeometry();tuft.setAttribute('position',new T.Float32BufferAttribute(blades,3));tuft.computeVertexNormals();m.grassBlade.side=T.DoubleSide;
-  instanced(tuft,m.grassBlade,grasses,(d,g)=>{d.position.set(g.x,g.y,g.z);d.scale.setScalar(g.s);d.rotation.y=g.r;});
+  for(let i=0;i<(c.terrainMode==='snow'?0:Math.min(60000,extent*halfZ*3));i++){const x=(rng()-.5)*(extent-4),z=(rng()-.5)*(2*halfZ-4);if(!occupied(x,z,.45))grasses.push({x,z,y:terrainHeight(x,z),s:.18+rng()*.24,r:rng()*Math.PI});}
+  const blades=[],bladeColors=[],baseColor=new T.Color('#405c2b'),tipColor=new T.Color('#9aab64');
+  for(let k=0;k<6;k++){
+    const a=k*2.4,dx=Math.cos(a),dz=Math.sin(a),height=.65+(k%3)*.12;
+    const pts=[[-.028,0,0],[.028,0,0],[-.018,height*.58,.09],[.018,height*.58,.09],[0,height,.24]];
+    for(const j of [0,1,2,1,3,2,2,3,4]){const [width,y,bend]=pts[j];blades.push(dx*(.12+bend)-dz*width,y,dz*(.12+bend)+dx*width);const color=baseColor.clone().lerp(tipColor,y/height);bladeColors.push(color.r,color.g,color.b);}
+  }
+  const tuft=new T.BufferGeometry();tuft.setAttribute('position',new T.Float32BufferAttribute(blades,3));tuft.setAttribute('color',new T.Float32BufferAttribute(bladeColors,3));tuft.computeVertexNormals();m.grassBlade.side=T.DoubleSide;m.grassBlade.vertexColors=true;m.grassBlade.color.set('#ffffff');
+  const grass=instanced(tuft,m.grassBlade,grasses,(d,g)=>{d.position.set(g.x,g.y,g.z);d.scale.setScalar(g.s);d.rotation.y=g.r;});
+  if(grass){grass.name='Meadow blades';grass.castShadow=false;grasses.forEach((g,i)=>grass.setColorAt(i,new T.Color().setRGB(.78+rng()*.22,.84+rng()*.16,.71+rng()*.25)));}
   if(c.environment==='urban'){
-    const buildings=[];
-    for(let x=-extent/2+14;x<extent/2-9;x+=13)for(let z=-43;z<48;z+=15){const b={x,z,y:terrainHeight(x,z),h:3+rng()*8,w:5+rng()*3,d:5+rng()*3};if(!occupied(x,z,Math.hypot(b.w+.2,b.d+.2)/2+1)&&rng()>.15)buildings.push(b);}
-    instanced(new T.BoxGeometry(1,1,1),m.building,buildings,(d,b)=>{d.position.set(b.x,b.y+b.h/2,b.z);d.scale.set(b.w,b.h,b.d);});
-    instanced(new T.BoxGeometry(1,1,1),m.roof,buildings,(d,b)=>{d.position.set(b.x,b.y+b.h+.13,b.z);d.scale.set(b.w+.2,.26,b.d+.2);});
-    for(const b of buildings){
-      box(parent,m.dark,b.x,b.y+b.h+.5,b.z,1.4,.7,1.8);
-      for(const side of [-1,1]){box(parent,m.concrete,b.x+side*b.w/2,b.y+b.h+.35,b.z,.16,.5,b.d);box(parent,m.concrete,b.x,b.y+b.h+.35,b.z+side*b.d/2,b.w,.5,.16);}
+    const buildings=Object.fromEntries(buildingStyles.map(name=>[name,[]]));
+    for(let x=-extent/2+14;x<extent/2-9;x+=13)for(let z=-halfZ+12;z<halfZ-7;z+=15){
+      const name=buildingStyles[Math.floor(rng()*buildingStyles.length)],size=kenneySize(name),scale=.85+rng()*.25,radius=Math.hypot(size[0],size[2])*scale/2+1;
+      if(!occupied(x,z,radius)&&!intersectsRoad(corridorZones,x,z,radius)&&rng()>.15)buildings[name].push({x,z,y:terrainHeight(x,z),scale});
     }
-    for(const b of buildings)for(let y=1.5;y<b.h-.8;y+=2.2)for(let x=-b.w/2+.8;x<b.w/2-.5;x+=1.6)for(const side of [-1,1])box(parent,m.dark,b.x+x,b.y+y,b.z+side*(b.d/2+.025),.85,1,.04);
+    for(const name of buildingStyles){
+      const mesh=instanced(kenneyGeometry(name),name.startsWith('building-type')?m.suburban:m.commercial,buildings[name],(d,b)=>{d.position.set(b.x,b.y,b.z);d.scale.setScalar(b.scale);});
+      if(mesh)mesh.name=`Kenney ${name}`;
+    }
   }
   return waters;
 }

@@ -8,3 +8,12 @@ CC0 public-domain assets from Poly Haven, converted to 1024 × 1024 WebP for fas
 - License: https://polyhaven.com/license
 
 Texture filenames retain their source asset identifiers. Concrete and asphalt use normal mapping; steel uses a coloured roughness/metalness material. No specular maps are needed for this material workflow.
+
+## River water
+
+The local river colour and normal maps are adapted from CC0 textures shared by Hazmat Harry and qubodup on OpenGameArt:
+
+- [Seamless Water Tiles](https://opengameart.org/content/seamless-water-tiles) by Hazmat Harry: the light and dark water JPEGs were blended and recoloured for the river surface.
+- [Three Live Procedurally Generated Tiling Water Textures](https://opengameart.org/content/3-live-proceduraly-generated-tiling-water-textures-512px-running-brushes) by qubodup: the brushwalker 137 tile was converted into the ripple normal map.
+
+Both source pages mark the textures as [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). The resulting WebP files are bundled under `textures/`; no runtime download is needed.

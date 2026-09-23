@@ -1,11 +1,12 @@
 import * as T from 'three';
 import {OrbitControls} from './vendor/OrbitControls.js';
-import {defaults,validate,totalLength,spacing,clearance,setClearance,encodeConfig,decodeConfig,depths,roadLayout,steelFinishes} from './geometry.mjs';
+import {defaults,validate,totalLength,spacing,clearance,setClearance,encodeConfig,decodeConfig,depths,roadLayout,steelFinishes,fitBoxLayout} from './geometry.mjs';
 import {release} from './release.mjs';
-import {makeMaterials,buildBridge,disposeModel,obstacleTour} from './scene.mjs';
+import {presets,makePreset} from './presets.mjs';
+import {makeMaterials,buildBridge,disposeModel,obstacleTour,animateTraffic} from './scene.mjs';
 
 const $=id=>document.getElementById(id),form=$('parameters');
-let config=validate(structuredClone(defaults)),model,renderer,camera,perspectiveCamera,orthoCamera,controls,scene,materials,view='perspective',pendingCamera;
+let config=makePreset(presets[0].id),model,renderer,camera,perspectiveCamera,orthoCamera,controls,scene,materials,view='perspective',pendingCamera;
 let messageTimer,driving=null;
 let needsRender=true,flowTime=0,lastTime=0,frameMs=0;
 function notify(message,error=false){clearTimeout(messageTimer);$('feedback').replaceChildren(document.createTextNode(message));$('feedback').classList.toggle('error',error);$('feedback').hidden=false;if(!error)messageTimer=setTimeout(()=>$('feedback').hidden=true,5000);}
@@ -15,6 +16,7 @@ function selectSpan(){
   [...$('spanRows').children].forEach((row,i)=>row.hidden=i!==activeSpan);
 }
 function initWorkspace(){
+  for(const p of presets){const option=new Option(p.label,p.id);option.title=p.description;$('preset').insertBefore(option,$('preset').lastElementChild);}
   $('release-version').textContent=release.name+' · v'+release.version;
   $('release-date').textContent=release.date+' · '+release.author;
   $('about-release').textContent='Version '+release.version+' · '+release.date;
@@ -46,14 +48,14 @@ function syncWaterFields(){
   });
 }
 function syncEnabled(){
-  const steel=config.material==='steel'||config.material==='box',box=config.material==='box',slab=config.material==='slab';$('nebt-label').hidden=steel||slab;$('steel-depth-label').hidden=!steel;$('slab-depth-label').hidden=!slab;$('steel-color-label').hidden=!steel;$('flange-note').hidden=!steel;$('box-width-label')?.toggleAttribute('hidden',!box);
+  const steel=config.material==='steel'||config.material==='box',box=config.material==='box',slab=config.material==='slab';$('nebt-label').hidden=steel||slab;$('steel-depth-label').hidden=!steel;$('slab-depth-label').hidden=!slab;$('steel-color-label').hidden=!steel;$('flange-note').hidden=!steel;$('box-width-label')?.toggleAttribute('hidden',!box);$('box-bottom-width-label')?.toggleAttribute('hidden',!box);
   for(const name of ['girders','overhang','haunch'])form.elements[name].disabled=slab;
   $('variable-depth-fields').hidden=!(steel||slab);form.elements.variableDepth.disabled=config.spans.length<2;form.elements.pierDepth.disabled=!config.variableDepth;form.elements.taper.disabled=!config.variableDepth;form.elements.variableDepth.checked=config.variableDepth;form.elements.girders.step='1';$('girder-count-label').hidden=box||slab;$('box-count-label').hidden=!box;$('boxCount').value=config.girders;form.elements.girders.value=config.girders;
   form.elements.wingAngle.disabled=config.abutmentType!=='wing';$('wing-angle-label').hidden=config.abutmentType!=='wing';
   $('column-shape-label').hidden=config.pierType!=='bent';$('column-size-label').textContent=config.columnShape==='square'?'Column side · m':'Column diameter · m';
   form.elements.sidewalkWidth.disabled=config.sidewalkSide==='none';$('median-width-label').hidden=config.medianType!=='sidewalk';
   $('steel-swatch').hidden=!steel;$('steel-swatch').style.background=steelFinishes[config.steelColor];
-  form.elements.columns.disabled=config.pierType!=='bent';
+  form.elements.columns.disabled=config.pierType!=='bent';$('bent-settings').hidden=config.pierType!=='bent';form.elements.movingTraffic.disabled=!config.showTraffic;
   $('columns-label').hidden=config.pierType!=='bent';$('column-diameter-label').hidden=config.pierType!=='bent';$('wall-settings').hidden=config.pierType!=='wall';$('hammerhead-settings').hidden=config.pierType!=='hammerhead';
   $('continuity-note').textContent=slab?(config.continuous?'Continuous solid slab across supports.':'Solid slab spans with joints at supports.'):!config.continuous?'Separate girder spans with joints at piers.':steel?'Unbroken girders and one bearing line at each pier.':'Precast spans joined with concrete closure diaphragms.';
   form.elements.material.options[0].disabled=config.curved;form.elements.radius.disabled=!config.curved;form.elements.direction.disabled=!config.curved;
@@ -68,11 +70,32 @@ function readForm(){
   for(const el of form.querySelectorAll('[data-span]:not([data-key="clearance"])'))raw.spans[Number(el.dataset.span)][el.dataset.key]=el.type==='number'?Number(el.value):el.value;
   return raw;
 }
+function applyTimeOfDay(hour){
+  if(!scene?.userData.lights)return;
+  const angle=(hour-6)*Math.PI/14,daylight=Math.sin(angle);
+  const warmth=T.MathUtils.clamp((Math.abs(hour-13)-2.5)/2.5,0,1);
+  const {hemi,sun,fill,rim}=scene.userData.lights;
+  sun.position.set(Math.cos(angle)*80,8+60*daylight,40);
+  sun.color.set('#fff2da').lerp(new T.Color('#ffd09c'),warmth);
+  sun.intensity=3.5-.25*warmth;
+  hemi.color.set('#dcecff').lerp(new T.Color('#d4e5fa'),warmth);
+  hemi.groundColor.set('#9fa78d').lerp(new T.Color('#998d70'),warmth);
+  hemi.intensity=2.5-.35*warmth;
+  fill.color.set('#c8ddfa');fill.intensity=1.25-.2*warmth;
+  rim.intensity=.6+.25*warmth;
+  scene.environmentIntensity=1-.1*warmth;
+  renderer.toneMappingExposure=1.05+.02*warmth;
+  $('timeOfDay').value=hour;
+  $('timeLabel').textContent=String(Math.floor(hour)).padStart(2,'0')+':'+String(Math.round((hour%1)*60)).padStart(2,'0');
+  $('dusk').checked=hour>=16.5&&hour<=18.5;
+  needsRender=true;
+}
 function update(raw,{resetCamera=false,refresh=false}={}){
   stopDriving();
   const next=validate(raw),started=performance.now(),replacement=buildBridge(next,materials);
-  if(model){scene.remove(model.root);disposeModel(model);}config=next;model=replacement;scene.add(model.root);model.deck.visible=!$('reveal').checked;model.setting.visible=view!=='elevation';
+  if(model){scene.remove(model.root);disposeModel(model);}config=next;model=replacement;scene.add(model.root);model.deck.visible=!$('reveal').checked;model.haunches.visible=!$('reveal').checked;model.setting.visible=view!=='elevation';
   document.body.classList.toggle('background-white',config.background==='white');
+  applyTimeOfDay(config.timeOfDay);
   if(refresh)refreshForm();else {syncEnabled();syncWaterFields();}
   const L=totalLength(config);$('length').innerHTML=`${L.toFixed(1)} <small>m</small>`;$('area').innerHTML=`${Math.round(L*config.width).toLocaleString()} <small>m²</small>`;$('spacing').textContent=`${config.material==='slab'?'Not applicable':spacing(config).toFixed(2)+' m'}`;
   $('clearance').innerHTML=`${Math.min(...config.spans.map((_,i)=>clearance(config,i))).toFixed(2)} <small>m</small>`;
@@ -115,7 +138,7 @@ function stopDriving(restore=true){
   if(!driving)return;
   const saved=driving.saved;driving=null;controls.enabled=true;controls.enableDamping=true;
   perspectiveCamera.fov=36;perspectiveCamera.updateProjectionMatrix();
-  const traffic=model.setting.children.find(o=>o.name==='Traffic');if(traffic)traffic.visible=true;model.deck.visible=!$('reveal').checked;
+  const traffic=model.setting.children.find(o=>o.name==='Traffic');if(traffic)traffic.visible=true;model.deck.visible=!$('reveal').checked;model.haunches.visible=!$('reveal').checked;
   $('drive').textContent='Drive';$('drive').setAttribute('aria-pressed','false');$('drive-status').hidden=true;
   if(restore)restoreCamera(saved);needsRender=true;
 }
@@ -154,19 +177,23 @@ async function boot(){
   const pmrem=new T.PMREMGenerator(renderer);scene.environment=pmrem.fromScene(skyScene,.04).texture;scene.environmentIntensity=.7;
   pmrem.dispose();skyGeometry.dispose();skyMaterial.dispose();
   const sun=new T.DirectionalLight(0xfff5e5,3.0);sun.position.set(-45,65,40);sun.castShadow=true;sun.shadow.mapSize.set(4096,4096);sun.shadow.camera.left=-160;sun.shadow.camera.right=160;sun.shadow.camera.top=110;sun.shadow.camera.bottom=-110;sun.shadow.camera.far=250;sun.shadow.normalBias=.04;sun.shadow.bias=-.00015;scene.add(sun);
-  const fill=new T.DirectionalLight(0xd4eaff,1.15);fill.position.set(50,25,-45);scene.add(fill);
-  scene.userData.lights={hemi,sun,fill};
+  const fill=new T.DirectionalLight(0xd4eaff,1.15);fill.position.set(50,35,-45);scene.add(fill);
+  const rim=new T.DirectionalLight(0xffe9cb,.7);rim.position.set(55,25,50);scene.add(rim);
+  scene.userData.lights={hemi,sun,fill,rim};
   perspectiveCamera=new T.PerspectiveCamera(36,1,.1,5000);orthoCamera=new T.OrthographicCamera(-50,50,50,-50,.1,5000);camera=perspectiveCamera;controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.dampingFactor=.08;controls.minDistance=8;controls.maxDistance=2500;controls.maxPolarAngle=Math.PI*.5;
   materials=makeMaterials(()=>needsRender=true);
   if(location.hash){try{const saved=decodeConfig(location.hash);config=saved.config;pendingCamera=saved.camera;}catch(e){notify(e.message,true);}}
   update(config,{refresh:true,resetCamera:true});
-  if(!location.hash)$('preset').value='river';
+  if(!location.hash){$('preset').value=presets[0].id;$('sceneTitle').textContent=presets[0].label;}
   restoreCamera(pendingCamera);
   const resize=()=>{const {clientWidth:w,clientHeight:h}=$('canvasHost');renderer.setSize(w,h);perspectiveCamera.aspect=w/h;perspectiveCamera.updateProjectionMatrix();orthoCamera.right=orthoCamera.top*w/h;orthoCamera.left=-orthoCamera.right;orthoCamera.updateProjectionMatrix();needsRender=true;};new ResizeObserver(resize).observe($('canvasHost'));resize();
-  controls.addEventListener('change',()=>needsRender=true);$('dusk').onchange=()=>{const dusk=$('dusk').checked;const {hemi,sun,fill}=scene.userData.lights;hemi.color.set(dusk?0xdce7ff:0xe1efff);hemi.groundColor.set(dusk?0x777565:0x9b9c87);hemi.intensity=dusk?1.6:2.3;fill.intensity=dusk?.5:1.15;sun.color.set(dusk?0xffd4a0:0xfff3dd);sun.intensity=dusk?2.6:3.0;sun.position.set(-45,dusk?22:65,40);renderer.toneMappingExposure=dusk?1.02:1.12;needsRender=true;};
+  controls.addEventListener('change',()=>needsRender=true);
+  $('timeOfDay').oninput=()=>{config.timeOfDay=Number($('timeOfDay').value);applyTimeOfDay(config.timeOfDay);};
+  $('dusk').onchange=()=>{config.timeOfDay=$('dusk').checked?17.5:12;applyTimeOfDay(config.timeOfDay);};
   $('tour').onchange=()=>{stopDriving();if($('tour').checked&&view!=='perspective')fit('perspective');controls.autoRotate=$('tour').checked;controls.autoRotateSpeed=.6;needsRender=true;};
+  controls.autoRotate=$('tour').checked&&view==='perspective';controls.autoRotateSpeed=.6;$('tour').checked=controls.autoRotate;
   $('drive').onclick=startDriving;window.addEventListener('keydown',e=>{if(e.key==='Escape')stopDriving();});
-  renderer.setAnimationLoop(time=>{const dt=Math.min(.05,(time-lastTime)/1000);lastTime=time;if(document.hidden)return;if(driving)driveFrame(dt);else controls.update(dt);const flowing=model.waters.length>0;if(flowing){flowTime+=dt;materials.water.userData.flowTime.value=flowTime;}if(needsRender||flowing||controls.autoRotate){const start=performance.now();renderer.render(scene,camera);frameMs=performance.now()-start;needsRender=false;}});
+  renderer.setAnimationLoop(time=>{const dt=Math.min(.05,(time-lastTime)/1000);lastTime=time;if(document.hidden)return;if(driving)driveFrame(dt);else controls.update(dt);const moving=config.movingTraffic&&config.showTraffic;if(moving)animateTraffic(model,dt);const flowing=model.waters.length>0;if(flowing){flowTime+=dt;materials.water.userData.flowTime.value=flowTime;if(materials.water.map)materials.water.map.offset.x=-flowTime*.015;if(materials.water.normalMap)materials.water.normalMap.offset.x=-flowTime*.023;}if(needsRender||flowing||moving||controls.autoRotate){const start=performance.now();renderer.render(scene,camera);frameMs=performance.now()-start;needsRender=false;}});
   registerTools();
 }
 form.addEventListener('submit',e=>e.preventDefault());
@@ -182,35 +209,41 @@ form.addEventListener('change',e=>{
       for(let j=a;j<=b;j++)for(const k of ['elevation','angle']){raw.spans[j][k]=raw.spans[index][k];form.querySelector(`[data-span="${j}"][data-key="${k}"]`).value=raw.spans[index][k];}
     }}
     if(e.target.id==='boxCount')raw.girders=Number(e.target.value);
-    if(e.target.name==='material'&&raw.material==='box'){
-      raw.girders=[2,4].includes(raw.girders)?raw.girders:4;
-      if((raw.width-2*raw.overhang)/(raw.girders-1)<raw.boxTopWidth+.2)raw.girders=2;
-      raw.overhang=Math.max(raw.overhang,raw.boxTopWidth/2);
+    if(raw.material==='box'){
+      if(e.target.id==='boxCount'||['material','width'].includes(e.target.name))Object.assign(raw,fitBoxLayout(raw));
+      else if(e.target.name==='boxTopWidth'){
+        raw.overhang=Number(((raw.width-(raw.girders-1)*(raw.boxTopWidth+1))/2).toFixed(3));
+        raw.boxBottomWidth=Number((raw.boxTopWidth-(config.boxTopWidth-config.boxBottomWidth)).toFixed(3));
+      }else if(e.target.name==='overhang'){
+        raw.boxTopWidth=Number((spacing(raw)-1).toFixed(3));
+        raw.boxBottomWidth=Number((raw.boxTopWidth-(config.boxTopWidth-config.boxBottomWidth)).toFixed(3));
+      }
     }
     if(e.target.name==='material'&&raw.material==='concrete'){raw.depth=depths.reduce((a,b)=>Math.abs(b-config.depth)<Math.abs(a-config.depth)?b:a);$('nebt').value=raw.depth;}
-    update(raw);form.elements.material.value=config.material;form.elements.overhang.value=config.overhang;}
+    update(raw);form.elements.material.value=config.material;form.elements.overhang.value=config.overhang;form.elements.boxTopWidth.value=config.boxTopWidth;form.elements.boxBottomWidth.value=config.boxBottomWidth;}
   $('feedback').hidden=true;
  }catch(error){refreshForm();notify(`${error.message} The last valid model remains visible.`,true);}
 });
-document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{controls.autoRotate=false;$('tour').checked=false;fit(b.dataset.view);}));$('fit').onclick=()=>fit(view);$('reveal').onchange=()=>{if(model)model.deck.visible=!$('reveal').checked;needsRender=true;};
-$('reset').onclick=()=>{update(structuredClone(defaults),{refresh:true,resetCamera:true});$('preset').value='river';$('feedback').hidden=true;};
-$('preset').onchange=()=>{
- const c=structuredClone(defaults),preset=$('preset').value;
- if(preset==='steel'){Object.assign(c,{material:'steel',curved:true,radius:160,depth:1.6,continuous:true,variableDepth:true,pierDepth:2.5,environment:'urban',skew:12});c.spans=[{length:28,obstacle:'road',width:12,elevation:0,angle:90},{length:34,obstacle:'rail',width:7,elevation:0,angle:80},{length:28,obstacle:'road',width:12,elevation:0,angle:90}];}
- if(preset==='mixed'){Object.assign(c,{skew:18,environment:'urban'});c.spans[0].obstacle='road';c.spans[0].width=10;c.spans[1].obstacle='rail';c.spans[1].width=6;}
- update(c,{refresh:true,resetCamera:true});$('preset').value=preset;$('feedback').hidden=true;
-};
+document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{controls.autoRotate=false;$('tour').checked=false;fit(b.dataset.view);}));$('fit').onclick=()=>fit(view);$('reveal').onchange=()=>{if(model){model.deck.visible=!$('reveal').checked;model.haunches.visible=!$('reveal').checked;}needsRender=true;};
+$('reset').onclick=()=>selectPreset(presets[0].id);
+function selectPreset(id){
+ const preset=presets.find(p=>p.id===id);if(!preset)return;
+ update(makePreset(id),{refresh:true});fit('perspective');
+ $('preset').value=id;$('sceneTitle').textContent=preset.label;$('preset').title=preset.description;
+ $('tour').checked=true;$('tour').onchange();$('feedback').hidden=true;
+}
+$('preset').onchange=()=>selectPreset($('preset').value);
 $('save').onclick=()=>download(new Blob([JSON.stringify({release,config,camera:captureCamera()},null,2)],{type:'application/json'}),'bridgesketch.json');
 $('load').onclick=()=>$('file').click();$('file').onchange=async()=>{try{const file=$('file').files[0];if(!file)return;if(file.size>24000)throw Error('Choose a BridgeSketch 3D configuration smaller than 24 KB.');const data=JSON.parse(await file.text()),saved={config:validate(data.config??data),camera:data.camera};update(saved.config,{refresh:true,resetCamera:true});restoreCamera(saved.camera);notify('Configuration loaded.');}catch(e){notify(e.message,true);}finally{$('file').value='';}};
 $('share').onclick=async()=>{const url=new URL(location.href);url.hash=encodeConfig(config,captureCamera());history.replaceState(null,'',url);try{await navigator.clipboard.writeText(url.href);notify('Link copied. It includes the bridge and camera view.');}catch{notify('Copy this link to share the bridge and camera view.');clearTimeout(messageTimer);const field=document.createElement('input');field.type='text';field.readOnly=true;field.value=url.href;field.setAttribute('aria-label','Bridge share link');field.style.cssText='width:100%;margin-top:10px;padding:8px';$('feedback').append(field);field.focus();field.select();}};
 $('image').onclick=()=>{renderer.render(scene,camera);const canvas=document.createElement('canvas');canvas.width=renderer.domElement.width;canvas.height=renderer.domElement.height;const ctx=canvas.getContext('2d');const bg=ctx.createRadialGradient(canvas.width*.45,canvas.height*.12,0,canvas.width*.45,canvas.height*.12,canvas.width);bg.addColorStop(0,'#5e7b8b');bg.addColorStop(.52,'#35566c');bg.addColorStop(1,'#203d51');ctx.fillStyle=config.background==='white'?'#ffffff':bg;ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(renderer.domElement,0,0);canvas.toBlob(blob=>{if(blob){download(blob,'bridge-view.png');notify('Snapshot saved.');}else notify('Could not create the snapshot.',true);},'image/png');};
-$('export-glb').onclick=async()=>{const button=$('export-glb');button.disabled=true;button.textContent='Exporting…';let waterMaterial;try{const {GLTFExporter}=await import('./vendor/GLTFExporter.js');const copy=model.root.clone(true);copy.children[0].visible=true;copy.children[2].visible=true;waterMaterial=new T.MeshStandardMaterial({color:'#427f84',roughness:.3});copy.traverse(o=>{if(o.material?.isShaderMaterial)o.material=waterMaterial;});const binary=await new GLTFExporter().parseAsync(copy,{binary:true,maxTextureSize:1024});download(new Blob([binary],{type:'model/gltf-binary'}),'bridge.glb');notify('3D model exported. Save JSON to keep editable parameters.');}catch(e){notify(`Model export failed: ${e.message}`,true);}finally{waterMaterial?.dispose();button.disabled=false;button.textContent='Export GLB';}};
+$('export-glb').onclick=async()=>{const button=$('export-glb');button.disabled=true;button.textContent='Exporting…';let waterMaterial;try{const {GLTFExporter}=await import('./vendor/GLTFExporter.js');const copy=model.root.clone(true);copy.children[0].visible=true;copy.children[1].children.find(o=>o.name==='Concrete deck haunches').visible=true;copy.children[2].visible=true;waterMaterial=new T.MeshStandardMaterial({color:'#427f84',roughness:.3});copy.traverse(o=>{if(o.material?.isShaderMaterial)o.material=waterMaterial;});const binary=await new GLTFExporter().parseAsync(copy,{binary:true,maxTextureSize:1024});download(new Blob([binary],{type:'model/gltf-binary'}),'bridge.glb');notify('3D model exported. Save JSON to keep editable parameters.');}catch(e){notify(`Model export failed: ${e.message}`,true);}finally{waterMaterial?.dispose();button.disabled=false;button.textContent='Export GLB';}};
 function registerTools(){
   if(!document.modelContext?.registerTool)return;
   const lifecycle=new AbortController();window.addEventListener('pagehide',()=>lifecycle.abort(),{once:true});
   const properties=Object.fromEntries(Object.entries(defaults).filter(([k])=>!['spans','version','web','deck','asphalt','barrier'].includes(k)).map(([k,v])=>[k,{type:typeof v}]));
   properties.spans={type:'array',minItems:1,maxItems:8,items:{type:'object',properties:{length:{type:'number'},obstacle:{type:'string',enum:['water','road','rail']},width:{type:'number'},elevation:{type:'number'},angle:{type:'number'}},required:['length','obstacle','width','elevation','angle'],additionalProperties:false}};
-  for(const tool of [{name:'get_bridge_configuration',description:'Read the current bridge parameters and geometry statistics.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true},execute:()=>({config:structuredClone(config),stats:window.bridgeViewer.getStats()})},{name:'configure_bridge',description:'Apply bridge parameters to the visible model. Supports plate and even-count box girders, variable-depth solid slabs, lanes, sidewalks, barriers and wingwalls. Asphalt 65 mm and steel web 14 mm remain fixed.',inputSchema:{type:'object',properties,additionalProperties:false},annotations:{readOnlyHint:false},execute:async parameters=>{if(!parameters||typeof parameters!=='object'||Array.isArray(parameters))throw Error('Provide bridge parameters.');update({...config,...parameters},{refresh:true});renderer.render(scene,camera);return {config:structuredClone(config),stats:window.bridgeViewer.getStats()};}}]){
+  for(const tool of [{name:'get_bridge_configuration',description:'Read the current bridge parameters and geometry statistics.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true},execute:()=>({config:structuredClone(config),stats:window.bridgeViewer.getStats()})},{name:'configure_bridge',description:'Apply bridge parameters to the visible model. Supports plate and 2–14 box girders, variable-depth solid slabs, lanes, sidewalks, barriers and wingwalls. Asphalt 65 mm and steel web 14 mm remain fixed.',inputSchema:{type:'object',properties,additionalProperties:false},annotations:{readOnlyHint:false},execute:async parameters=>{if(!parameters||typeof parameters!=='object'||Array.isArray(parameters))throw Error('Provide bridge parameters.');update({...config,...parameters},{refresh:true});renderer.render(scene,camera);return {config:structuredClone(config),stats:window.bridgeViewer.getStats()};}}]){
     try{Promise.resolve(document.modelContext.registerTool(tool,{signal:lifecycle.signal})).catch(console.warn);}catch(e){console.warn(e);}
   }
 }

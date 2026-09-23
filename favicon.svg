@@ -1,1 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="15" fill="#102d41"/><path d="M9 31 42 18 56 26 23 40Z" fill="#73e4c2"/><path d="M9 31v5l14 8 33-13v-5L23 39Z" fill="#00a99a"/><path d="M18 40v11l6 3V43m21-8v12l6-2V33" fill="#d9f5eb"/><path d="m16 30 10 5m4-10 10 5m4-9 7 4" stroke="#102d41" stroke-width="1.8"/><path d="M10 52 54 35" stroke="#91adbe" stroke-width="1.2" stroke-dasharray="2 3"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="BridgeSketch 3D bridge logo">
+<defs>
+  <linearGradient id="sky" x2="0" y2="1"><stop stop-color="#112d45"/><stop offset="1" stop-color="#1c5566"/></linearGradient>
+  <linearGradient id="deck" x2="0" y2="1"><stop stop-color="#87f1d1"/><stop offset="1" stop-color="#28b6a5"/></linearGradient>
+</defs>
+<rect width="64" height="64" rx="15" fill="url(#sky)"/>
+<circle cx="48" cy="14" r="6" fill="#f6be71"/>
+<path d="M8 49h48" stroke="#a9dacf" stroke-width="2" opacity=".55"/>
+<path d="M7 53q6-3 12 0t12 0t12 0t13 0M7 59q6-3 12 0t12 0t12 0t13 0" fill="none" stroke="#47bdcb" stroke-width="2" opacity=".85"/>
+<path d="M18 34v16m28-16v16" stroke="#eaf5ed" stroke-width="5" stroke-linecap="round"/>
+<path d="M17 39h30" stroke="#9fd5d0" stroke-width="2" opacity=".75"/>
+<path d="M8 27q24-6 48 0v7q-24-5-48 0z" fill="url(#deck)"/>
+<path d="M8 27q24-6 48 0" fill="none" stroke="#f4fbef" stroke-width="2" stroke-linecap="round"/>
+<path d="M11 23v4m10-6v4m11-5v4m11-3v4m10-2v4" stroke="#e4f8ee" stroke-width="1.8" stroke-linecap="round"/>
+<path d="M10 22q22-5 44 0" fill="none" stroke="#e4f8ee" stroke-width="2" stroke-linecap="round"/>
+</svg>
