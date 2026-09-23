@@ -35,7 +35,7 @@ export const roadLayout = c => {
 };
 // +u is the driver's right when travelling in the increasing-station direction.
 export const laneForward = (c,index) => c.laneCount===1 || index>=Math.floor(c.laneCount/2);
-export const steelFinishes = {blue:'#2B3A5B',green:'#77A662',gray:'#435468',weathered:'#9A6436',bluegreen:'#2B3A5B',greengray:'#435468',red:'#955A48'};
+export const steelFinishes = {blue:'#536A7A',green:'#647C6B',gray:'#777F81',weathered:'#8B6047',bluegreen:'#536A7A',greengray:'#777F81',red:'#955A48'};
 export const terrainBase = c => Math.min(-1.5,...c.spans.map(s=>s.elevation-1.5));
 export const approachDrop = (c,s,base=terrainBase(c)) => Math.max(.5,profile(c,s)-base-.17);
 export const approachToeOffset = (c,s,base=terrainBase(c)) => 2*approachDrop(c,s,base);
@@ -45,15 +45,16 @@ export function validate(raw) {
   if(raw.version!==undefined && raw.version!==1) throw Error('This configuration version is not supported.');
   const c={...defaults,...Object.fromEntries(Object.keys(defaults).filter(k=>Object.hasOwn(raw,k)).map(k=>[k,raw[k]]))};
   c.steelColor=({bluegreen:'blue',greengray:'gray',red:'weathered'})[c.steelColor]??c.steelColor;
+  if(typeof c.steelColor==='string'&&/^#[0-9a-f]{6}$/i.test(c.steelColor))c.steelColor=c.steelColor.toUpperCase();
   if(!Object.hasOwn(raw,'boxBottomWidth'))c.boxBottomWidth=c.boxTopWidth-c.depth/2;
   Object.assign(c,{asphalt:.065,deck:.225,web:.014,barrier:1.1});
-  const limits={width:[4,30],overhang:[0.65,8],girders:[2,14],depth:[0.4,3],slabDepth:[.3,2],pierDepth:[0.4,5],taper:[10,45],columnDiameter:[0.35,3],hammerheadWidth:[1,8],hammerheadThickness:[0.35,2],wallThickness:[0.25,2],web:[0.008,0.08],deck:[0.15,0.6],asphalt:[0.025,0.2],haunch:[0.05,0.5],barrier:[0.8,1.5],wingAngle:[0,90],laneCount:[1,8],sidewalkWidth:[.5,6],boxTopWidth:[.8,15],boxBottomWidth:[.3,15],sceneWidth:[90,240],timeOfDay:[6,20],skew:[-45,45],radius:[80,5000],elevation:[3,30],rise:[0,3],grade:[-6,6],approach:[5,60],seed:[0,99999]};
+  const limits={width:[4,30],overhang:[0.65,8],girders:[2,14],depth:[0.4,3],slabDepth:[.3,2],pierDepth:[0.4,5],taper:[10,45],columnDiameter:[0.35,3],hammerheadWidth:[1,8],hammerheadThickness:[0.35,2],wallThickness:[0.25,2],web:[0.008,0.08],deck:[0.15,0.6],asphalt:[0.025,0.2],haunch:[0.05,0.5],barrier:[0.8,1.5],wingAngle:[0,90],laneCount:[1,8],sidewalkWidth:[.5,6],boxTopWidth:[.8,15],boxBottomWidth:[.3,15],sceneWidth:[90,240],timeOfDay:[0,24],skew:[-45,45],radius:[80,5000],elevation:[3,30],rise:[0,3],grade:[-6,6],approach:[5,60],seed:[0,99999]};
   Object.assign(limits,{laneWidth:[2.5,4.5],bentWidth:[.5,5],bentThickness:[.35,3]});
   for(const [k,[lo,hi]] of Object.entries(limits)) if(typeof c[k]!=='number'||!Number.isFinite(c[k])||c[k]<lo||c[k]>hi) throw Error(`${k}: enter a number from ${lo} to ${hi}.`);
   if(typeof c.movingTraffic!=='boolean')throw Error('Invalid moving traffic option.');
   if(!Number.isInteger(c.girders)||!Number.isInteger(c.seed)||!Number.isInteger(c.laneCount)) throw Error('Girder count, lane count and scenery seed must be whole numbers.');
   if(typeof c.curved!=='boolean'||![1,-1].includes(c.direction)) throw Error('Invalid horizontal alignment.');
-  if(typeof c.continuous!=='boolean'||!['weathered','green','blue','bluegreen','greengray','gray','red'].includes(c.steelColor)||!['concrete','steel','box','slab'].includes(c.material)||!['concrete','steel'].includes(c.barrierType)||!['return','wing'].includes(c.abutmentType)||!['none','left','right','both'].includes(c.sidewalkSide)||!['bent','wall','hammerhead'].includes(c.pierType)||!Number.isInteger(c.columns)||c.columns<1||c.columns>6) throw Error('Invalid material, barrier, wall, sidewalk or pier configuration.');
+  if(typeof c.continuous!=='boolean'||!(Object.hasOwn(steelFinishes,c.steelColor)||/^#[0-9A-F]{6}$/.test(c.steelColor))||!['concrete','steel','box','slab'].includes(c.material)||!['concrete','steel'].includes(c.barrierType)||!['return','wing'].includes(c.abutmentType)||!['none','left','right','both'].includes(c.sidewalkSide)||!['bent','wall','hammerhead'].includes(c.pierType)||!Number.isInteger(c.columns)||c.columns<1||c.columns>6) throw Error('Invalid material, barrier, wall, sidewalk or pier configuration.');
   if(!['mixed','diesel','bullet','city'].includes(c.trainStyle))throw Error('Select a train style.');
   if(!['grass','snow'].includes(c.terrainMode))throw Error('Select grass or snow terrain.');
   if(!['rural','urban','none'].includes(c.environment)||!['crest','constant'].includes(c.profile)||typeof c.showTraffic!=='boolean') throw Error('Invalid environment, profile or traffic option.');

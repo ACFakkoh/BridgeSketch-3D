@@ -1,5 +1,12 @@
 # BridgeSketch 3D
 
+## 0.4.1 — 2026-09-23 — Anthony Chéruel
+
+- Return walls follow the approach road's vertical profile and horizontal alignment, including skewed supports and curved crests.
+- Midnight scene and dark controls, available from the time slider or Midnight button; night views persist in saved concepts, links and snapshots.
+- CC0 Poly Haven rough-concrete colour, normal and roughness maps replace the generated concrete surface; steel paint colours are more restrained.
+- Steel girders accept a colour picker and validated six-digit hex code, preserved in JSON, links and exports.
+
 ## 0.4.0 — 2026-09-22 — Anthony Chéruel
 
 - Railway consists now vary reproducibly from 4 to 12 cars; full-length trains enter and leave the visible railway corridor.

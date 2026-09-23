@@ -12,11 +12,12 @@ export function makeMaterials(onLoad=()=>{}) {
   if(typeof document!=='undefined'){
     const loader=new T.TextureLoader();
     const load=(file,color=false)=>{const t=loader.load(`./textures/${file}`,onLoad,undefined,()=>console.warn(`Could not load ${file}`));t.wrapS=t.wrapT=T.RepeatWrapping;t.anisotropy=8;if(color)t.colorSpace=T.SRGBColorSpace;return t;};
-    for(const [key,file,size,normal] of [['asphalt','asphalt_4k.webp',4.5,'asphalt_01_nor_gl.webp'],['concrete','concrete_4k.webp',3.5,'concrete_wall_009_nor_gl.webp'],['grass','meadow-v2.webp',1.6,'']]){
-      m[key].map=load(file,true);m[key].color.set(key==='grass'?'#dce7c9':key==='concrete'?'#999b94':'#687176');m[key].userData.textureMetres=size;
-      if(normal){m[key].normalMap=load(normal);m[key].normalScale.setScalar(key==='asphalt'?.32:.24);}
+    for(const [key,file,size,normal] of [['asphalt','asphalt_4k.webp',4.5,'asphalt_01_nor_gl.webp'],['concrete','rough_concrete_diff_1k.jpg',1.2,'rough_concrete_nor_gl_1k.jpg'],['grass','meadow-v2.webp',1.6,'']]){
+      m[key].map=load(file,true);m[key].color.set(key==='grass'?'#dce7c9':key==='concrete'?'#f0f0ed':'#687176');m[key].userData.textureMetres=size;
+      if(normal){m[key].normalMap=load(normal);m[key].normalScale.setScalar(key==='asphalt'?.32:.32);}
     }
-    m.edge.map=m.concrete.map;m.edge.normalMap=m.concrete.normalMap;m.edge.normalScale.setScalar(.25);m.edge.userData.textureMetres=3.5;
+    m.concrete.roughnessMap=load('rough_concrete_rough_1k.jpg');
+    m.edge.map=m.concrete.map;m.edge.normalMap=m.concrete.normalMap;m.edge.roughnessMap=m.concrete.roughnessMap;m.edge.normalScale.setScalar(.32);m.edge.color.set('#f9f8f4');m.edge.userData.textureMetres=1.2;
     // Painted steel uses the selected sRGB colour directly; a dark diffuse map hid the finishes.
     for(const [key,file,size] of [['earth','meadow-v2.webp',3],['tree','foliage-v2.webp',0],['treeLight','foliage-v2.webp',0]]){
       const t=load(file,true);
@@ -254,7 +255,7 @@ function seeded(seed){return ()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;
 
 export function buildBridge(c,m,{batch=true}={}) {
   const fills=approachSurfaces(c);
-  m.steel.color.set(steelFinishes[c.steelColor]);m.steel.metalness=c.steelColor==='weathered'?.03:.22;m.steel.roughness=c.steelColor==='weathered'?.92:c.steelColor==='green'?.38:.46;m.steel.userData.weathered.value=c.steelColor==='weathered'?1:0;
+  m.steel.color.set(steelFinishes[c.steelColor]??c.steelColor);m.steel.metalness=c.steelColor==='weathered'?.03:.22;m.steel.roughness=c.steelColor==='weathered'?.92:.58;m.steel.userData.weathered.value=c.steelColor==='weathered'?1:0;
   const root=new T.Group(),deck=new T.Group(),structure=new T.Group(),setting=new T.Group();
   root.name='BridgeSketch 3D';deck.name='Deck and barriers';structure.name='Girders and supports';setting.name='Environment';root.add(deck,structure,setting);
   const haunches=new T.Group();haunches.name='Concrete deck haunches';structure.add(haunches);
@@ -324,13 +325,18 @@ export function buildBridge(c,m,{batch=true}={}) {
     if(j===0||j===ss.length-1){
       wallBetween(structure,m.concrete,supportPoint(c,s,-half+.15,0),supportPoint(c,s,half-.15,0),1.8,earth,top);
       // Wing/return walls use the actual skewed support line and bridge tangent.
-      const direction=j===0?-1:1,wallY=(top+earth)/2;
+      const direction=j===0?-1:1;
       wallBetween(structure,m.concrete,supportPoint(c,s+direction*.8,-half+.15,0),supportPoint(c,s+direction*.8,half-.15,0),.4,top,Math.max(top+.2,profile(c,s)-c.asphalt));
       for(const side of [-1,1]){
-        const u=side*(half-.3),p0=supportPoint(c,s,u,wallY),f=frame(c,supportStation(c,s,u),u),a=(c.abutmentType==='wing'?c.wingAngle:0)*Math.PI/180;
+        const u=side*(half-.3),p0=supportPoint(c,s,u,0),f=frame(c,supportStation(c,s,u),u),a=(c.abutmentType==='wing'?c.wingAngle:0)*Math.PI/180;
         const corner=fills.corners.find(p=>p.end===s&&p.side===side),length=Math.max(6,Math.abs(corner.station-s));
-        const vx=direction*f.tx*Math.cos(a)+side*f.nx*Math.sin(a),vz=direction*f.tz*Math.cos(a)+side*f.nz*Math.sin(a),p1=c.abutmentType==='return'?supportPoint(c,s+direction*length,u,wallY):[p0[0]+vx*length,wallY,p0[2]+vz*length];
-        wallBetween(structure,m.concrete,p0,p1,.45,earth,Math.max(top+.2,profile(c,s)-.17));
+        if(c.abutmentType==='return'){
+          const end=s+direction*length,wall=sweep(c,Math.min(s,end),Math.max(s,end),rect(u-.225,u+.225,0,earth),m.concrete,(_,station,v)=>v===0?profile(c,station)-.17:0,Math.ceil(length));
+          wall.name=`Return wall ${j===0?'start':'end'} ${side<0?'left':'right'}`;structure.add(wall);
+        }else{
+          const vx=direction*f.tx*Math.cos(a)+side*f.nx*Math.sin(a),vz=direction*f.tz*Math.cos(a)+side*f.nz*Math.sin(a),p1=[p0[0]+vx*length,0,p0[2]+vz*length];
+          wallBetween(structure,m.concrete,p0,p1,.45,earth,Math.max(top+.2,profile(c,s)-.17));
+        }
       }
     }else if(c.pierType==='wall'){
       wallBetween(structure,m.concrete,supportPoint(c,s,-half+.15,0),supportPoint(c,s,half-.15,0),c.wallThickness,earth,top);

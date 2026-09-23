@@ -22,4 +22,4 @@ Prompt: Seamless tileable photorealistic PBR base color texture of compacted civ
 
 ## 4K material set
 
-`steel_4k.webp`, `concrete_4k.webp`, and `asphalt_4k.webp` are 4096 × 4096 WebP diffuse maps generated for the current presentation pass. The refreshed maps use isotropic detail to avoid directional bands: medium slate painted steel with sparse oxidation, light cast concrete with random aggregate and pores, and medium charcoal asphalt with random aggregate. They are paired with the existing local normal maps for lightweight detail. The viewer maps them over 3.5–4.5 metre areas so detail reads as a continuous surface instead of repeating strips.
+`steel_4k.webp`, `concrete_4k.webp`, and `asphalt_4k.webp` are 4096 × 4096 WebP diffuse maps generated for the 0.4.0 presentation pass. In 0.4.1 the concrete map was replaced by Poly Haven's rough-concrete PBR maps. The steel and concrete generated maps are retained as historical assets; asphalt remains active.

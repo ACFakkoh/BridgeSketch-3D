@@ -48,13 +48,15 @@ function syncWaterFields(){
   });
 }
 function syncEnabled(){
-  const steel=config.material==='steel'||config.material==='box',box=config.material==='box',slab=config.material==='slab';$('nebt-label').hidden=steel||slab;$('steel-depth-label').hidden=!steel;$('slab-depth-label').hidden=!slab;$('steel-color-label').hidden=!steel;$('flange-note').hidden=!steel;$('box-width-label')?.toggleAttribute('hidden',!box);$('box-bottom-width-label')?.toggleAttribute('hidden',!box);
+  const steel=config.material==='steel'||config.material==='box',box=config.material==='box',slab=config.material==='slab';$('nebt-label').hidden=steel||slab;$('steel-depth-label').hidden=!steel;$('slab-depth-label').hidden=!slab;$('steel-color-controls').hidden=!steel;$('flange-note').hidden=!steel;$('box-width-label')?.toggleAttribute('hidden',!box);$('box-bottom-width-label')?.toggleAttribute('hidden',!box);
   for(const name of ['girders','overhang','haunch'])form.elements[name].disabled=slab;
   $('variable-depth-fields').hidden=!(steel||slab);form.elements.variableDepth.disabled=config.spans.length<2;form.elements.pierDepth.disabled=!config.variableDepth;form.elements.taper.disabled=!config.variableDepth;form.elements.variableDepth.checked=config.variableDepth;form.elements.girders.step='1';$('girder-count-label').hidden=box||slab;$('box-count-label').hidden=!box;$('boxCount').value=config.girders;form.elements.girders.value=config.girders;
   form.elements.wingAngle.disabled=config.abutmentType!=='wing';$('wing-angle-label').hidden=config.abutmentType!=='wing';
   $('column-shape-label').hidden=config.pierType!=='bent';$('column-size-label').textContent=config.columnShape==='square'?'Column side · m':'Column diameter · m';
   form.elements.sidewalkWidth.disabled=config.sidewalkSide==='none';$('median-width-label').hidden=config.medianType!=='sidewalk';
-  $('steel-swatch').hidden=!steel;$('steel-swatch').style.background=steelFinishes[config.steelColor];
+  const paint=steelFinishes[config.steelColor]??config.steelColor;
+  form.elements.steelColor.value=Object.hasOwn(steelFinishes,config.steelColor)?config.steelColor:'custom';
+  $('steelPicker').value=paint;$('steelHex').value=paint.toUpperCase();$('steel-swatch').style.background=paint;
   form.elements.columns.disabled=config.pierType!=='bent';$('bent-settings').hidden=config.pierType!=='bent';form.elements.movingTraffic.disabled=!config.showTraffic;
   $('columns-label').hidden=config.pierType!=='bent';$('column-diameter-label').hidden=config.pierType!=='bent';$('wall-settings').hidden=config.pierType!=='wall';$('hammerhead-settings').hidden=config.pierType!=='hammerhead';
   $('continuity-note').textContent=slab?(config.continuous?'Continuous solid slab across supports.':'Solid slab spans with joints at supports.'):!config.continuous?'Separate girder spans with joints at piers.':steel?'Unbroken girders and one bearing line at each pier.':'Precast spans joined with concrete closure diaphragms.';
@@ -72,19 +74,21 @@ function readForm(){
 }
 function applyTimeOfDay(hour){
   if(!scene?.userData.lights)return;
-  const angle=(hour-6)*Math.PI/14,daylight=Math.sin(angle);
+  const night=hour<6||hour>20,angle=(hour-6)*Math.PI/14,daylight=Math.max(0,Math.sin(angle));
   const warmth=T.MathUtils.clamp((Math.abs(hour-13)-2.5)/2.5,0,1);
   const {hemi,sun,fill,rim}=scene.userData.lights;
   sun.position.set(Math.cos(angle)*80,8+60*daylight,40);
-  sun.color.set('#fff2da').lerp(new T.Color('#ffd09c'),warmth);
-  sun.intensity=3.5-.25*warmth;
-  hemi.color.set('#dcecff').lerp(new T.Color('#d4e5fa'),warmth);
-  hemi.groundColor.set('#9fa78d').lerp(new T.Color('#998d70'),warmth);
-  hemi.intensity=2.5-.35*warmth;
-  fill.color.set('#c8ddfa');fill.intensity=1.25-.2*warmth;
-  rim.intensity=.6+.25*warmth;
-  scene.environmentIntensity=1-.1*warmth;
-  renderer.toneMappingExposure=1.05+.02*warmth;
+  sun.color.set(night?'#a9c7ed':'#fff2da');if(!night)sun.color.lerp(new T.Color('#ffd09c'),warmth);
+  sun.intensity=night?1.35:3.5-.25*warmth;
+  hemi.color.set(night?'#7186a8':'#dcecff');if(!night)hemi.color.lerp(new T.Color('#d4e5fa'),warmth);
+  hemi.groundColor.set(night?'#283844':'#9fa78d');if(!night)hemi.groundColor.lerp(new T.Color('#998d70'),warmth);
+  hemi.intensity=night?1.05:2.5-.35*warmth;
+  fill.color.set(night?'#7293bf':'#c8ddfa');fill.intensity=night?.5:1.25-.2*warmth;
+  rim.intensity=night?.18:.6+.25*warmth;
+  scene.environmentIntensity=night?.25:1-.1*warmth;
+  renderer.toneMappingExposure=night?1.05:1.05+.02*warmth;
+  document.body.classList.toggle('midnight',night);
+  $('midnight').setAttribute('aria-pressed',night);
   $('timeOfDay').value=hour;
   $('timeLabel').textContent=String(Math.floor(hour)).padStart(2,'0')+':'+String(Math.round((hour%1)*60)).padStart(2,'0');
   $('dusk').checked=hour>=16.5&&hour<=18.5;
@@ -190,6 +194,7 @@ async function boot(){
   controls.addEventListener('change',()=>needsRender=true);
   $('timeOfDay').oninput=()=>{config.timeOfDay=Number($('timeOfDay').value);applyTimeOfDay(config.timeOfDay);};
   $('dusk').onchange=()=>{config.timeOfDay=$('dusk').checked?17.5:12;applyTimeOfDay(config.timeOfDay);};
+  $('midnight').onclick=()=>{config.timeOfDay=config.timeOfDay<6||config.timeOfDay>20?17.5:0;applyTimeOfDay(config.timeOfDay);};
   $('tour').onchange=()=>{stopDriving();if($('tour').checked&&view!=='perspective')fit('perspective');controls.autoRotate=$('tour').checked;controls.autoRotateSpeed=.6;needsRender=true;};
   controls.autoRotate=$('tour').checked&&view==='perspective';controls.autoRotateSpeed=.6;$('tour').checked=controls.autoRotate;
   $('drive').onclick=startDriving;window.addEventListener('keydown',e=>{if(e.key==='Escape')stopDriving();});
@@ -204,6 +209,9 @@ form.addEventListener('change',e=>{
     const count=Number(e.target.value);if(!Number.isInteger(count)||count<1||count>8)throw Error('Use 1 to 8 spans.');
     const raw=readForm();raw.spans=Array.from({length:count},(_,i)=>raw.spans[i]??{...raw.spans.at(-1)});update(raw,{refresh:true,resetCamera:true});
   }else{const raw=readForm();if(raw.curved&&raw.material==='concrete')raw.material='steel';
+    if(e.target.id==='steelPicker')raw.steelColor=$('steelPicker').value;
+    if(e.target.id==='steelHex')raw.steelColor=$('steelHex').value.trim();
+    if(e.target.name==='steelColor'&&raw.steelColor==='custom')raw.steelColor=$('steelPicker').value;
     if(e.target.dataset.span!==undefined){const index=Number(e.target.dataset.span),key=e.target.dataset.key;if(key==='clearance')setClearance(raw,index,Number(e.target.value));if(raw.spans[index].obstacle==='water'){
       let a=index,b=index;while(a>0&&raw.spans[a-1].obstacle==='water')a--;while(b<raw.spans.length-1&&raw.spans[b+1].obstacle==='water')b++;
       for(let j=a;j<=b;j++)for(const k of ['elevation','angle']){raw.spans[j][k]=raw.spans[index][k];form.querySelector(`[data-span="${j}"][data-key="${k}"]`).value=raw.spans[index][k];}
@@ -236,7 +244,7 @@ $('preset').onchange=()=>selectPreset($('preset').value);
 $('save').onclick=()=>download(new Blob([JSON.stringify({release,config,camera:captureCamera()},null,2)],{type:'application/json'}),'bridgesketch.json');
 $('load').onclick=()=>$('file').click();$('file').onchange=async()=>{try{const file=$('file').files[0];if(!file)return;if(file.size>24000)throw Error('Choose a BridgeSketch 3D configuration smaller than 24 KB.');const data=JSON.parse(await file.text()),saved={config:validate(data.config??data),camera:data.camera};update(saved.config,{refresh:true,resetCamera:true});restoreCamera(saved.camera);notify('Configuration loaded.');}catch(e){notify(e.message,true);}finally{$('file').value='';}};
 $('share').onclick=async()=>{const url=new URL(location.href);url.hash=encodeConfig(config,captureCamera());history.replaceState(null,'',url);try{await navigator.clipboard.writeText(url.href);notify('Link copied. It includes the bridge and camera view.');}catch{notify('Copy this link to share the bridge and camera view.');clearTimeout(messageTimer);const field=document.createElement('input');field.type='text';field.readOnly=true;field.value=url.href;field.setAttribute('aria-label','Bridge share link');field.style.cssText='width:100%;margin-top:10px;padding:8px';$('feedback').append(field);field.focus();field.select();}};
-$('image').onclick=()=>{renderer.render(scene,camera);const canvas=document.createElement('canvas');canvas.width=renderer.domElement.width;canvas.height=renderer.domElement.height;const ctx=canvas.getContext('2d');const bg=ctx.createRadialGradient(canvas.width*.45,canvas.height*.12,0,canvas.width*.45,canvas.height*.12,canvas.width);bg.addColorStop(0,'#5e7b8b');bg.addColorStop(.52,'#35566c');bg.addColorStop(1,'#203d51');ctx.fillStyle=config.background==='white'?'#ffffff':bg;ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(renderer.domElement,0,0);canvas.toBlob(blob=>{if(blob){download(blob,'bridge-view.png');notify('Snapshot saved.');}else notify('Could not create the snapshot.',true);},'image/png');};
+$('image').onclick=()=>{renderer.render(scene,camera);const canvas=document.createElement('canvas');canvas.width=renderer.domElement.width;canvas.height=renderer.domElement.height;const ctx=canvas.getContext('2d');const bg=ctx.createRadialGradient(canvas.width*.45,canvas.height*.12,0,canvas.width*.45,canvas.height*.12,canvas.width);for(const [stop,color] of (document.body.classList.contains('midnight')?[[0,'#172b46'],[.52,'#0a1930'],[1,'#050d1d']]:[[0,'#5e7b8b'],[.52,'#35566c'],[1,'#203d51']]))bg.addColorStop(stop,color);ctx.fillStyle=document.body.classList.contains('midnight')?bg:config.background==='white'?'#ffffff':bg;ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(renderer.domElement,0,0);canvas.toBlob(blob=>{if(blob){download(blob,'bridge-view.png');notify('Snapshot saved.');}else notify('Could not create the snapshot.',true);},'image/png');};
 $('export-glb').onclick=async()=>{const button=$('export-glb');button.disabled=true;button.textContent='Exporting…';let waterMaterial;try{const {GLTFExporter}=await import('./vendor/GLTFExporter.js');const copy=model.root.clone(true);copy.children[0].visible=true;copy.children[1].children.find(o=>o.name==='Concrete deck haunches').visible=true;copy.children[2].visible=true;waterMaterial=new T.MeshStandardMaterial({color:'#427f84',roughness:.3});copy.traverse(o=>{if(o.material?.isShaderMaterial)o.material=waterMaterial;});const binary=await new GLTFExporter().parseAsync(copy,{binary:true,maxTextureSize:1024});download(new Blob([binary],{type:'model/gltf-binary'}),'bridge.glb');notify('3D model exported. Save JSON to keep editable parameters.');}catch(e){notify(`Model export failed: ${e.message}`,true);}finally{waterMaterial?.dispose();button.disabled=false;button.textContent='Export GLB';}};
 function registerTools(){
   if(!document.modelContext?.registerTool)return;
