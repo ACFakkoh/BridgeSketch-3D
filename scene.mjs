@@ -619,11 +619,15 @@ function addEnvironment(c,m,parent,fills){
   for(const z of [-halfZ,halfZ])for(let x=-extent/2;x<extent/2;x+=2){const w=Math.min(2,extent/2-x),y=terrainHeight(x+w/2,z);box(parent,m.earth,x+w/2,(y+base)/2,z,w,y-base,.25);}
   for(const x of [-extent/2,extent/2])for(let z=-halfZ;z<halfZ;z+=2){const d=Math.min(2,halfZ-z),y=terrainHeight(x,z+d/2);box(parent,ground,x,(y+base)/2,z+d/2,.25,y-base,d);}
   for(const [a,b] of fills.ranges){
-    const start=a<0,target=start?-extent/2:extent/2,outer=start?a:b,section=[];
-    for(let j=0;j<=24;j++){const u=-c.width/2+c.width*j/24;let station=outer;
-      for(let k=0;k<5;k++){const actual=supportStation(c,station,u),x=frame(c,actual,u).x,delta=.01,derivative=(frame(c,supportStation(c,station+delta,u),u).x-x)/delta;station+=(target-x)/derivative;}
-      const actual=supportStation(c,station,u),p=frame(c,actual,u);section.push([[target,profile(c,actual)-.17,p.z],[target,base,p.z]]);
+    const start=a<0,target=start?-extent/2:extent/2,points=fills.flatMap(face=>face.filter(p=>Math.abs(p[0]-target)<.002));
+    for(const u of [-c.width/2,c.width/2]){
+      let station=start?a:b;
+      for(let k=0;k<5;k++){const actual=supportStation(c,station,u),x=frame(c,actual,u).x,delta=.01,derivative=(frame(c,supportStation(c,station+delta,u),u).x-x)/delta;station+=(target-x)/Math.max(.1,derivative);}
+      const actual=supportStation(c,station,u),p=frame(c,actual,u);points.push([target,profile(c,actual)-.17,p.z]);
     }
+    points.sort((p,q)=>p[2]-q[2]);const top=[];
+    for(const p of points){if(top.length&&Math.abs(p[2]-top.at(-1)[2])<.002){if(p[1]>top.at(-1)[1])top[top.length-1]=p;}else top.push(p);}
+    const section=top.map(p=>[[target,p[1],p[2]],[target,base,p[2]]]);
     const vertices=[],uv=[];for(let j=0;j<section.length-1;j++){
       const [p,q]=section[j],[r,t]=section[j+1],face=start?[p,t,r,p,q,t]:[p,r,t,p,t,q];
       for(let k=0;k<face.length;k++){vertices.push(...face[k]);uv.push(face[k][2]/2,face[k][1]/2);}
