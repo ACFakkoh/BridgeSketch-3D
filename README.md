@@ -1,6 +1,6 @@
 # BridgeSketch 3D
 
-**A quick visual tool for bridge concepts** · Version 0.4.2 · 24 September 2026 · Anthony Chéruel
+**A quick visual tool for bridge concepts** · Version 0.4.3 · 24 September 2026 · Anthony Chéruel
 
 BridgeSketch 3D is a browser-based, interactive 3D bridge configurator. Set a span arrangement, road section, superstructure, supports and site, then explore the result from above, below or along the obstacle being crossed. It runs entirely from local files served by the included offline launcher, or as a static site on GitHub Pages. There is no account, backend, build step or runtime internet dependency.
 

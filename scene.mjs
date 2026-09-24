@@ -106,10 +106,9 @@ export function steelSection(h,w) {
   return [[-.25,0],[.25,0],[.25,-.05],[w/2,-.05],[w/2,-h+.05],[.25,-h+.05],[.25,-h],[-.25,-h],[-.25,-h+.05],[-w/2,-h+.05],[-w/2,-.05],[-.25,-.05]];
 }
 export function boxSection(h,top,bottom=top-h/2,plate=.05,web=.014) {
-  // Shift web attachment inside either flange as needed; each web still inclines 1H:4V.
-  const topWeb=Math.min(top/2-.25,bottom/2+h/4-.07),bottomWeb=topWeb-h/4;
-  if(bottomWeb<=web+.05)return null;
-  return {topLeft:rect(-topWeb-.25,-topWeb+.25,0,-plate),topRight:rect(topWeb-.25,topWeb+.25,0,-plate),bottom:[[-bottom/2,-h+plate],[bottom/2,-h+plate],[bottom/2,-h],[-bottom/2,-h]],left:[[-topWeb,0],[-topWeb+web,0],[-bottomWeb+web,-h],[-bottomWeb,-h]],right:[[bottomWeb,-h],[bottomWeb-web,-h],[topWeb-web,0],[topWeb,0]]};
+  const bottomWeb=bottom/2,topWeb=bottomWeb+(h-2*plate)/4;
+  if(topWeb+.25>top/2+.001||bottomWeb<=web+.05)return null;
+  return {topLeft:rect(-topWeb-.25,-topWeb+.25,0,-plate),topRight:rect(topWeb-.25,topWeb+.25,0,-plate),bottom:[[-bottom/2,-h+plate],[bottom/2,-h+plate],[bottom/2,-h],[-bottom/2,-h]],left:[[-topWeb,-plate],[-topWeb+web,-plate],[-bottomWeb+web,-h+plate],[-bottomWeb,-h+plate]],right:[[bottomWeb,-h+plate],[bottomWeb-web,-h+plate],[topWeb-web,-plate],[topWeb,-plate]]};
 }
 const rect=(a,b,top,bottom)=>[[a,top],[b,top],[b,bottom],[a,bottom]];
 
@@ -238,8 +237,8 @@ export function animateTraffic(model,dt){
 
 export const guardrailSection = [[-.04,.53],[.035,.57],[.05,.62],[-.025,.68],[.05,.74],[.035,.80],[-.04,.84],[-.044,.836],[.030,.797],[.044,.741],[-.031,.680],[.044,.619],[.030,.573],[-.044,.534]];
 function bridgeRailing(parent,m,c,a,b,edge,side,type,baseOffset=0){
-  const u=edge-side*.18,height=type==='210A'?.87:1.4,curb=[[edge,0],[edge-side*.45,0],[edge-side*.38,.28],[edge-side*.07,.28]];
-  if(side<0)curb.reverse();parent.add(sweep(c,a,b,curb,m.edge,(_,q)=>profile(c,q)+baseOffset));
+  const u=edge-side*.18,height=type==='210A'?.87:1.4,curb=[[edge,0],[edge-side*.45,0],[edge-side*.38,.28],[edge,.28]];
+  if(side<0)curb.reverse();parent.add(sweep(c,a,b,chamferSection(curb),m.edge,(_,q)=>profile(c,q)+baseOffset));
   const rail=(y,w=.14,h=.12)=>{const top=.28+y+h/2,bottom=.28+y-h/2,t=.006;for(const section of [rect(u-w/2,u+w/2,top,top-t),rect(u-w/2,u+w/2,bottom+t,bottom),rect(u-w/2,u-w/2+t,top-t,bottom+t),rect(u+w/2-t,u+w/2,top-t,bottom+t)])parent.add(sweep(c,a,b,section,m.railing,(_,q)=>profile(c,q)+baseOffset));};
   if(type==='20C'){rail(.08,.08,.05);rail(1.38,.08,.05);}else{
     for(const y of [.18,.51,.81])rail(Math.min(y,height-.06));
@@ -330,8 +329,10 @@ export function buildBridge(c,m,{batch=true}={}) {
       }
       // Fill from the straight girder chord to the deck profile.
       const haunchHeight=(_,s,v)=>v>-.5?profile(c,s)-c.asphalt-c.deck:girderTop(c,i,s)+1;
-      const haunchesAt=c.material==='box'?[-c.boxTopWidth/2+.25,c.boxTopWidth/2-.25]:[0];
-      for(const offset of haunchesAt)addSweep(haunches,a+(c.continuous?0:.22),b-(c.continuous?0:.22),chamferSection(rect(u+offset-.19,u+offset+.19,0,-1)),m.concrete,haunchHeight);
+      for(const side of c.material==='box'?[-1,1]:[0]){
+        const section=station=>{const flange=c.material==='box'?boxSection(girderDepth(c,supportStation(c,station,u),u),c.boxTopWidth,c.boxBottomWidth,.05,c.web)[side<0?'topLeft':'topRight']:rect(-.25,.25,0,-.05);return chamferSection(rect(u+flange[0][0],u+flange[1][0],0,-1));};
+        addSweep(haunches,a+(c.continuous?0:.22),b-(c.continuous?0:.22),section,m.concrete,haunchHeight);
+      }
     }
     for(let s=a+1.2;s<b&&c.material!=='slab';s+=Math.max(5,(b-a-2.4)/3))for(let g=0;g<c.girders-1;g++){
       const u=-half+c.overhang+g*gspace,top=girderTop(c,i,s)-.13,bot=top-Math.min(girderDepth(c,s,u),girderDepth(c,s,u+gspace))+.26;
@@ -517,7 +518,7 @@ export function approachSurfaces(c,extent=0){
     for(const corner of corners){
       const side=corner.side,a=Math.min(outer,corner.station),b=Math.max(outer,corner.station);
       for(let s=a;s<b;s+=1){const p=apex(s,half*side),q=apex(Math.min(b,s+1),half*side);local.push([p.p,q.p,toe(q.p,q.f.nx*side,q.f.nz*side),toe(p.p,p.f.nx*side,p.f.nz*side)]);}
-      for(let i=0;i<24;i++){const cone=[corner.p,corner.ring[i],corner.ring[i+1]];cone.finish=c.approachConeMaterial==='stone'?'stone':c.frontSlope?c.frontSlopeMaterial:'grass';local.push(cone);}
+      for(let i=0;i<24;i++){const cone=[corner.p,corner.ring[i],corner.ring[i+1]];cone.finish=c.approachConeMaterial;local.push(cone);}
     }
     // Clip numerical/curve overshoot at the same abutment plane.
     for(const face of local){

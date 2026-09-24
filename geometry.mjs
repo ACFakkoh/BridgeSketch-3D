@@ -15,11 +15,14 @@ export const depths = [1,1.2,1.4,1.6,1.8];
 export const totalLength = c => c.spans.reduce((n,s)=>n+s.length,0);
 export const spacing = c => c.girders===1?0:(c.width-2*c.overhang)/(c.girders-1);
 export function fitBoxLayout(c){
-  const edge=1.2,gap=1;
-  if(c.girders===1){const boxTopWidth=Math.min(15,c.width-2*edge);return {...c,boxTopWidth,boxBottomWidth:Number((boxTopWidth-c.depth/2).toFixed(3)),overhang:c.width/2};}
+  const deepest=c.variableDepth?c.pierDepth:c.depth,minTop=.3+(deepest-.1)/2+.5;
+  if(c.girders===1){const edge=Math.max(.35,Math.min(.6,(c.width-minTop)/2)),boxTopWidth=Number(Math.min(15,c.width-2*edge).toFixed(3));if(boxTopWidth<minTop-.001)throw Error('This deck is too narrow for one full-width steel box.');return {...c,boxTopWidth,boxBottomWidth:Number((boxTopWidth-(deepest-.1)/2-.5).toFixed(3)),overhang:c.width/2};}
+  let edge=Math.max(.35,Math.min(1.2,(c.width-(c.girders-1)-c.girders*minTop)/2));
+  const gap=Math.max(.2,Math.min(1,(c.width-2*edge-c.girders*minTop)/(c.girders-1)));
   const boxTopWidth=Number(((c.width-2*edge-(c.girders-1)*gap)/c.girders).toFixed(3));
-  if(boxTopWidth<.8||boxTopWidth>15)throw Error('This deck width cannot fit that many boxes with safe spacing.');
-  return {...c,boxTopWidth,boxBottomWidth:Number((boxTopWidth-c.depth/2).toFixed(3)),overhang:Number((edge+boxTopWidth/2).toFixed(3))};
+  if(boxTopWidth<minTop-.001||boxTopWidth>15)throw Error('This deck width cannot fit the boxes and their full-width bottom-flange web connections.');
+  edge=(c.width-c.girders*boxTopWidth-(c.girders-1)*gap)/2;
+  return {...c,boxTopWidth,boxBottomWidth:Number((boxTopWidth-(deepest-.1)/2-.5).toFixed(3)),overhang:Number((edge+boxTopWidth/2).toFixed(3))};
 }
 export const stations = c => c.spans.reduce((a,s)=>[...a,a.at(-1)+s.length],[0]);
 export const roadLayout = c => {
@@ -76,7 +79,7 @@ export function validate(raw) {
   if(c.material==='box'){
     const deepest=c.variableDepth?c.pierDepth:c.depth;
     if(c.boxBottomWidth>c.boxTopWidth)throw Error('Box bottom flange must not be wider than the top flange.');
-    if(Math.min(c.boxTopWidth/2-.25,c.boxBottomWidth/2+deepest/4-.07)-deepest/4<=c.web+.05)throw Error('Box girder depth leaves no internal width; increase flange widths or reduce depth.');
+    if(c.boxBottomWidth+(deepest-.1)/2+.5>c.boxTopWidth+.001)throw Error('Box top flange must cover webs rising from both bottom-flange edges; reduce bottom width or depth.');
   }
   if(c.material==='concrete'&&!depths.includes(c.depth)) throw Error('Select a standard NEBT depth.');
   if(!Array.isArray(c.spans)||c.spans.length<1||c.spans.length>8) throw Error('Use 1 to 8 spans.');

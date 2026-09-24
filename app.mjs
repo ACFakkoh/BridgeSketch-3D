@@ -1,6 +1,6 @@
 import * as T from 'three';
 import {OrbitControls} from './vendor/OrbitControls.js';
-import {defaults,validate,totalLength,spacing,clearance,setClearance,encodeConfig,decodeConfig,depths,roadLayout,steelFinishes,fitBoxLayout,profile,girderTop,girderDepth} from './geometry.mjs';
+import {defaults,validate,totalLength,spacing,clearance,setClearance,encodeConfig,decodeConfig,depths,roadLayout,steelFinishes,fitBoxLayout,profile,girderTop,girderDepth,supportStation} from './geometry.mjs';
 import {release} from './release.mjs';
 import {presets,makePreset} from './presets.mjs';
 import {makeMaterials,buildBridge,disposeModel,obstacleTour,animateTraffic,nebtSection,steelSection,boxSection} from './scene.mjs';
@@ -98,18 +98,20 @@ function renderSection(){
   const c=config,L=totalLength(c),slider=$('sectionStation');if(Number(slider.max)!==L)slider.value=L/2;slider.max=L;
   const s=Math.min(L,Math.max(0,Number(slider.value)||L/2));slider.value=s;$('sectionStationLabel').textContent=`${s.toFixed(2)} m`;
   const i=Math.min(c.spans.length-1,c.spans.findIndex((_,j)=>s<=c.spans.slice(0,j+1).reduce((n,v)=>n+v.length,0))),road=roadLayout(c),half=c.width/2;
-  const actualDepth=girderDepth(c,s),top=c.material==='slab'?-.065:girderTop(c,i,s)-profile(c,s),bottom=c.material==='slab'?-actualDepth-.065:top-actualDepth;
+  const actualDepth=girderDepth(c,s),depthAt=u=>girderDepth(c,supportStation(c,s,u),u),top=c.material==='slab'?-.065:girderTop(c,i,s)-profile(c,s);
+  const deepest=Math.max(actualDepth,...Array.from({length:c.material==='slab'?9:c.girders},(_,g)=>depthAt(c.material==='slab'?-half+c.width*g/8:-half+c.overhang+g*spacing(c))));
+  const bottom=c.material==='slab'?-deepest-.065:top-deepest;
   const svg=$('sectionSvg'),svgWidth=Math.max(580,Math.min(1000,svg.clientWidth||800));svg.setAttribute('viewBox',`0 0 ${svgWidth} 600`);
   const lo=Math.min(bottom-.55,-2),hi=2.1,k=Math.min((svgWidth-40)/(c.width+2),440/(hi-lo)),cy=255+k*(hi+lo)/2;
   const poly=(points,fill,stroke='#344a50')=>`<polygon points="${points.map(p=>p.join(',')).join(' ')}" fill="${fill}" stroke="${stroke}" stroke-width=".018"/>`;
   const rectangle=(a,b,t,d,fill)=>poly([[a,t],[b,t],[b,d],[a,d]],fill);
   let drawing=`<line x1="${-half-1}" x2="${half+1}" y1="0" y2="0" stroke="#849596" stroke-width=".018" stroke-dasharray=".12 .1"/>`;
-  if(c.material==='slab')drawing+=rectangle(-half,half,-.065,bottom,'#a7a49a');
+  if(c.material==='slab'){const us=Array.from({length:25},(_,j)=>-half+c.width*j/24);drawing+=poly([...us.map(u=>[u,-.065]),...[...us].reverse().map(u=>[u,-.065-depthAt(u)])],'#a7a49a');}
   else{
     for(let g=0;g<c.girders;g++){
-      const u=-half+c.overhang+g*spacing(c),sections=c.material==='concrete'?[nebtSection(actualDepth)]:c.material==='box'?Object.values(boxSection(actualDepth,c.boxTopWidth,c.boxBottomWidth,.05,c.web)):[steelSection(c.depth,c.web).map(([x,y])=>[x,y<-.05?y+c.depth-actualDepth:y])];
+      const u=-half+c.overhang+g*spacing(c),girderDepthAt=depthAt(u),sections=c.material==='concrete'?[nebtSection(girderDepthAt)]:c.material==='box'?Object.values(boxSection(girderDepthAt,c.boxTopWidth,c.boxBottomWidth,.05,c.web)):[steelSection(c.depth,c.web).map(([x,y])=>[x,y<-.05?y+c.depth-girderDepthAt:y])];
       for(const section of sections)drawing+=poly(section.map(([x,y])=>[x+u,y+top]),c.material==='concrete'?'#aba79a':steelFinishes[c.steelColor]??c.steelColor);
-      for(const offset of c.material==='box'?[-c.boxTopWidth/2+.25,c.boxTopWidth/2-.25]:[0])drawing+=rectangle(u+offset-.19,u+offset+.19,-.29,top,'#c0bdb1');
+      for(const flange of c.material==='box'?[sections[0],sections[1]]:[[[ -.25,0],[.25,0]]])drawing+=rectangle(u+flange[0][0],u+flange[1][0],-.29,top,'#c0bdb1');
     }
     drawing+=rectangle(-half,half,-.065,-.29,'#b9b6aa');
   }
@@ -120,7 +122,7 @@ function renderSection(){
   const railing=(edge,side,type,raised=0)=>{
     if(type==='concrete')return poly([[0,0],[-.45,0],[-.45,.1],[-.23,.35],[-.18,1.1],[-.02,1.1],[0,.15]].map(([x,y])=>[edge+side*x,y+raised]),'#a9a79d');
     const u=edge-side*.18,h=type==='210A'?.87:1.4;
-    let result=poly([[edge,0],[edge-side*.45,0],[edge-side*.38,.28],[edge-side*.07,.28]].map(([x,y])=>[x,y+raised]),'#b8b5aa');
+    let result=poly([[edge,0],[edge-side*.45,0],[edge-side*.38,.28],[edge,.28]].map(([x,y])=>[x,y+raised]),'#b8b5aa');
     result+=rectangle(u-.045,u+.045,.28+raised+h,.28+raised,'#879597');
     for(const y of type==='20C'?[.08,1.38]:type==='210C'?[.18,.51,.81,1.38]:[.18,.51,.81])result+=rectangle(u-.075,u+.075,.28+raised+y+.04,.28+raised+y-.04,'#879597');
     return result;
@@ -260,7 +262,7 @@ form.addEventListener('change',e=>{
     if(e.target.id==='boxCount')raw.girders=Number(e.target.value);
     if(e.target.name==='bentThickness'&&config.bentEndThickness===config.bentThickness)raw.bentEndThickness=raw.bentThickness;
     if(e.target.name==='material'&&raw.material==='box')raw.girders=raw.width<7?1:2;
-    if(raw.material==='box'&&(e.target.id==='boxCount'||['material','width'].includes(e.target.name)))Object.assign(raw,fitBoxLayout(raw));
+    if(raw.material==='box'&&(e.target.id==='boxCount'||['material','width','variableDepth','depth','pierDepth'].includes(e.target.name)))Object.assign(raw,fitBoxLayout(raw));
     if(e.target.name==='material'&&raw.material==='concrete'){raw.depth=depths.reduce((a,b)=>Math.abs(b-config.depth)<Math.abs(a-config.depth)?b:a);$('nebt').value=raw.depth;}
     update(raw);form.elements.material.value=config.material;form.elements.overhang.value=config.overhang;form.elements.boxBottomWidth.value=config.boxBottomWidth;}
   $('feedback').hidden=true;
@@ -285,7 +287,7 @@ function registerTools(){
   const lifecycle=new AbortController();window.addEventListener('pagehide',()=>lifecycle.abort(),{once:true});
   const properties=Object.fromEntries(Object.entries(defaults).filter(([k])=>!['spans','version','web','deck','asphalt','barrier','barrierType','boxTopWidth'].includes(k)).map(([k,v])=>[k,{type:typeof v}]));
   properties.spans={type:'array',minItems:1,maxItems:8,items:{type:'object',properties:{length:{type:'number'},obstacle:{type:'string',enum:['water','road','rail']},width:{type:'number'},elevation:{type:'number'},angle:{type:'number'}},required:['length','obstacle','width','elevation','angle'],additionalProperties:false}};
-  for(const tool of [{name:'get_bridge_configuration',description:'Read the current bridge parameters and geometry statistics.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true},execute:()=>({config:structuredClone(config),stats:window.bridgeViewer.getStats()})},{name:'configure_bridge',description:'Apply bridge parameters to the visible model. Supports plate and 1–14 box girders, variable-depth slabs and steel girders, sidewalks, railings and abutment slopes. Asphalt 65 mm and steel web 14 mm remain fixed.',inputSchema:{type:'object',properties,additionalProperties:false},annotations:{readOnlyHint:false},execute:async parameters=>{if(!parameters||typeof parameters!=='object'||Array.isArray(parameters))throw Error('Provide bridge parameters.');let next={...config,...parameters};if(next.material==='box'&&['material','girders','width'].some(k=>Object.hasOwn(parameters,k)))next=fitBoxLayout(next);update(next,{refresh:true});renderer.render(scene,camera);return {config:structuredClone(config),stats:window.bridgeViewer.getStats()};}}]){
+  for(const tool of [{name:'get_bridge_configuration',description:'Read the current bridge parameters and geometry statistics.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true},execute:()=>({config:structuredClone(config),stats:window.bridgeViewer.getStats()})},{name:'configure_bridge',description:'Apply bridge parameters to the visible model. Supports plate and 1–14 box girders, variable-depth slabs and steel girders, sidewalks, railings and abutment slopes. Asphalt 65 mm and steel web 14 mm remain fixed.',inputSchema:{type:'object',properties,additionalProperties:false},annotations:{readOnlyHint:false},execute:async parameters=>{if(!parameters||typeof parameters!=='object'||Array.isArray(parameters))throw Error('Provide bridge parameters.');let next={...config,...parameters};if(next.material==='box'&&['material','girders','width','variableDepth','depth','pierDepth'].some(k=>Object.hasOwn(parameters,k)))next=fitBoxLayout(next);update(next,{refresh:true});renderer.render(scene,camera);return {config:structuredClone(config),stats:window.bridgeViewer.getStats()};}}]){
     try{Promise.resolve(document.modelContext.registerTool(tool,{signal:lifecycle.signal})).catch(console.warn);}catch(e){console.warn(e);}
   }
 }

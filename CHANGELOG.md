@@ -1,5 +1,14 @@
 # BridgeSketch 3D
 
+## 0.4.3 — 2026-09-24 — Anthony Chéruel
+
+- Concrete haunches now match their 500 mm steel top flanges, including both moving flanges of variable-depth box girders.
+- Each inclined box web starts at the corresponding edge of the bottom flange. Automatic box layout sizes the bottom plate to preserve the 1H:4V web slope at maximum depth.
+- Steel-railing wheel curbs keep a vertical outer face and an inclined road-side face, as in the supplied drawings. Their concrete edges retain 15 mm chamfers; the transverse SVG section shows the same shape.
+- Concrete facing in front of an abutment no longer changes the separately selected grass or stone approach-cone finish.
+- Skewed, curved approach asphalt reaches the full model cut width; the grass-covered rear closure spans both embankment slopes.
+- Added `TASKS.md` to track verified fixes, publication and subsequent R&D work.
+
 ## 0.4.2 — 2026-09-24 — Anthony Chéruel
 
 - Backwall and return-wall tops follow the actual road profile under skew and curves; concrete edges receive 15 mm chamfers.

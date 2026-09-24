@@ -24,7 +24,7 @@ export const presets = [
   {
     id:'box', label:'Curved twin boxes',
     description:'Blue paired box girders sweep across city roads and a central railway.',
-    config:{...defaults,material:'box',steelColor:'blue',girders:2,boxTopWidth:5.1,boxBottomWidth:4.45,overhang:3.75,
+    config:{...defaults,material:'box',steelColor:'blue',girders:2,boxTopWidth:5.1,boxBottomWidth:3.55,overhang:3.75,
       width:13.6,depth:1.3,continuous:true,variableDepth:true,pierDepth:2.2,taper:30,
       curved:true,radius:160,direction:1,skew:10,elevation:7.4,rise:.45,approach:25,
       barrierType:'steel',leftRailing:'210C',rightRailing:'210C',sidewalkSide:'right',sidewalkWidth:2.5,pierType:'hammerhead',
