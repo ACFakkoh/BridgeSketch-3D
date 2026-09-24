@@ -7,7 +7,8 @@ import {frame,profile,totalLength,stations,spacing,supportStation,girderTop,gird
 
 export function makeMaterials(onLoad=()=>{}) {
   const material=(color,roughness=.85,metalness=0)=>new T.MeshStandardMaterial({color,roughness,metalness});
-  const m={concrete:material('#a5a397',.88),edge:material('#aaa99e',.86),asphalt:material('#30363a',.9),steel:material('#64707a',.7,.5),dark:material('#253037',.65,.15),railing:material('#9ba6a6',.62,.7),guardrail:material('#9da6a1',.55,.75),reflector:material('#f0c84c',.4,.1),grass:material('#839873'),grassBlade:material('#4d8052'),earth:material('#8f9581'),sand:material('#b7ad91'),white:material('#ebe6cf'),yellow:material('#eec45f'),tree:material('#446c58'),treeLight:material('#658f67'),trunk:material('#655849'),building:material('#b9c6c9'),roof:material('#728891'),vehicle:material('#c85b4d',.5,.15),vehicleAlt:material('#4c7895',.5,.15),truck:material('#d38a42',.58,.1),glass:material('#9fd6df',.25,.2),wheel:material('#20292d',.9)};
+  const m={concrete:material('#a5a397',.88),edge:material('#aaa99e',.86),asphalt:material('#30363a',.9),steel:material('#64707a',.7,.5),dark:material('#253037',.65,.15),railing:material('#9ba6a6',.62,.7),guardrail:material('#9da6a1',.55,.75),reflector:material('#f0c84c',.4,.1),grass:material('#839873'),grassBlade:material('#4d8052'),earth:material('#8f9581'),stone:material('#ffffff'),sand:material('#b7ad91'),white:material('#ebe6cf'),yellow:material('#eec45f'),tree:material('#446c58'),treeLight:material('#658f67'),trunk:material('#655849'),building:material('#b9c6c9'),roof:material('#728891'),vehicle:material('#c85b4d',.5,.15),vehicleAlt:material('#4c7895',.5,.15),truck:material('#d38a42',.58,.1),glass:material('#9fd6df',.25,.2),wheel:material('#20292d',.9)};
+  m.concrete.userData.chamfer=m.edge.userData.chamfer=true;
   ['#23577e','#b93632','#e5e8e6','#34464b','#c9a34e','#42785e','#776a8b'].forEach((color,i)=>m['paint'+i]=material(color,.32,.28));
   if(typeof document!=='undefined'){
     const loader=new T.TextureLoader();
@@ -17,6 +18,7 @@ export function makeMaterials(onLoad=()=>{}) {
       if(normal){m[key].normalMap=load(normal);m[key].normalScale.setScalar(key==='asphalt'?.32:.32);}
     }
     m.concrete.roughnessMap=load('rough_concrete_rough_1k.jpg');
+    m.stone.map=load('rock_ground_diffuse_1k.jpg',true);m.stone.normalMap=load('rock_ground_nor_gl_1k.jpg');m.stone.roughnessMap=load('rock_ground_rough_1k.jpg');m.stone.normalScale.setScalar(.4);m.stone.userData.textureMetres=2;
     m.edge.map=m.concrete.map;m.edge.normalMap=m.concrete.normalMap;m.edge.roughnessMap=m.concrete.roughnessMap;m.edge.normalScale.setScalar(.32);m.edge.color.set('#f9f8f4');m.edge.userData.textureMetres=1.2;
     // Painted steel uses the selected sRGB colour directly; a dark diffuse map hid the finishes.
     for(const [key,file,size] of [['earth','meadow-v2.webp',3],['tree','foliage-v2.webp',0],['treeLight','foliage-v2.webp',0]]){
@@ -105,15 +107,20 @@ export function steelSection(h,w) {
 }
 export function boxSection(h,top,bottom=top-h/2,plate=.05,web=.014) {
   // Shift web attachment inside either flange as needed; each web still inclines 1H:4V.
-  const topWeb=Math.min(top/2-.07,bottom/2+h/4-.07),bottomWeb=topWeb-h/4;
+  const topWeb=Math.min(top/2-.25,bottom/2+h/4-.07),bottomWeb=topWeb-h/4;
   if(bottomWeb<=web+.05)return null;
-  return {top:[[-top/2,0],[top/2,0],[top/2,-plate],[-top/2,-plate]],bottom:[[-bottom/2,-h+plate],[bottom/2,-h+plate],[bottom/2,-h],[-bottom/2,-h]],left:[[-topWeb,0],[-topWeb+web,0],[-bottomWeb+web,-h],[-bottomWeb,-h]],right:[[bottomWeb,-h],[bottomWeb-web,-h],[topWeb-web,0],[topWeb,0]]};
+  return {topLeft:rect(-topWeb-.25,-topWeb+.25,0,-plate),topRight:rect(topWeb-.25,topWeb+.25,0,-plate),bottom:[[-bottom/2,-h+plate],[bottom/2,-h+plate],[bottom/2,-h],[-bottom/2,-h]],left:[[-topWeb,0],[-topWeb+web,0],[-bottomWeb+web,-h],[-bottomWeb,-h]],right:[[bottomWeb,-h],[bottomWeb-web,-h],[topWeb-web,0],[topWeb,0]]};
 }
 const rect=(a,b,top,bottom)=>[[a,top],[b,top],[b,bottom],[a,bottom]];
 
 // A section swept along the actual alignment. Every edge meets the support skew plane.
+function chamferSection(points){return points.flatMap((p,i)=>{
+    const prev=points[(i+points.length-1)%points.length],next=points[(i+1)%points.length],l0=Math.hypot(p[0]-prev[0],p[1]-prev[1])||1,l1=Math.hypot(p[0]-next[0],p[1]-next[1])||1,d0=Math.min(.015,l0*.45),d1=Math.min(.015,l1*.45);
+    return [[p[0]+(prev[0]-p[0])*d0/l0,p[1]+(prev[1]-p[1])*d0/l0],[p[0]+(next[0]-p[0])*d1/l1,p[1]+(next[1]-p[1])*d1/l1]];
+  });}
 export function sweep(c,a,b,section,mat,height=profile,segments) {
-  const sectionAt=typeof section==='function'?section:()=>section;
+  const rawSection=typeof section==='function'?section:()=>section;
+  const sectionAt=mat.userData.chamfer&&height===profile?station=>chamferSection(rawSection(station)):rawSection;
   const initial=sectionAt(a),n=initial.length,steps=segments??Math.max(1,Math.ceil((b-a)/(c.variableDepth?.4:c.curved?1.5:3))),pos=[],uv=[],indices=[];
   const samples=Array.from({length:steps+1},(_,j)=>a+(b-a)*j/steps);
   if(c.variableDepth&&segments!==1)for(const station of stations(c))if(station>a&&station<b)samples.push(station);
@@ -139,7 +146,7 @@ export function sweep(c,a,b,section,mat,height=profile,segments) {
 }
 export function boxGirder(c,a,b,u,mat){
   const group=new T.Group();group.name='Hollow steel box';
-  for(const plate of ['top','bottom','left','right']){
+  for(const plate of ['topLeft','topRight','bottom','left','right']){
     const section=station=>{
       const d=girderDepth(c,supportStation(c,station,u),u);
       return boxSection(d,c.boxTopWidth,c.boxBottomWidth,.05,c.web)[plate].map(([x,y])=>[x+u,y]);
@@ -149,11 +156,17 @@ export function boxGirder(c,a,b,u,mat){
   return group;
 }
 export function slabMesh(c,a,b,mat){
-  return sweep(c,a,b,rect(-c.width/2,c.width/2,-c.asphalt,-c.asphalt-c.slabDepth),mat,
-    (_,s,v,u)=>profile(c,s)+(v<-c.asphalt?c.slabDepth-girderDepth(c,s,u):0));
+  return sweep(c,a,b,chamferSection(rect(-c.width/2,c.width/2,-c.asphalt,-c.asphalt-c.slabDepth)),mat,
+    (_,s,v,u)=>profile(c,s)+(v<-c.asphalt-c.slabDepth/2?c.slabDepth-girderDepth(c,s,u):0));
 }
 function box(parent,mat,x,y,z,w,h,d,yaw=0){
-  const o=new T.Mesh(new T.BoxGeometry(w,h,d),mat);o.position.set(x,y,z);o.rotation.y=yaw;o.castShadow=true;o.receiveShadow=true;parent.add(o);return o;
+  let geometry;
+  if(mat.userData.chamfer&&Math.min(w,h,d)>.06){
+    const bevel=.015,shape=new T.Shape(),a=w/2-bevel,b=h/2-bevel;
+    shape.moveTo(-a+bevel,-b);for(const [px,py] of [[a-bevel,-b],[a,-b+bevel],[a,b-bevel],[a-bevel,b],[-a+bevel,b],[-a,b-bevel],[-a,-b+bevel]])shape.lineTo(px,py);shape.closePath();
+    geometry=new T.ExtrudeGeometry(shape,{depth:d-2*bevel,bevelEnabled:true,bevelThickness:bevel,bevelSize:bevel,bevelSegments:1,curveSegments:1});geometry.translate(0,0,-d/2+bevel);
+  }else geometry=new T.BoxGeometry(w,h,d);
+  const o=new T.Mesh(geometry,mat);o.position.set(x,y,z);o.rotation.y=yaw;o.castShadow=true;o.receiveShadow=true;parent.add(o);return o;
 }
 function supportBasis(c,s,u=0){
   const step=.1,station=supportStation(c,s,u),p=frame(c,station,u),lo=frame(c,supportStation(c,s,u-step),u-step),hi=frame(c,supportStation(c,s,u+step),u+step);
@@ -211,26 +224,37 @@ export function animateTraffic(model,dt){
 }
 
 export const guardrailSection = [[-.04,.53],[.035,.57],[.05,.62],[-.025,.68],[.05,.74],[.035,.80],[-.04,.84],[-.044,.836],[.030,.797],[.044,.741],[-.031,.680],[.044,.619],[.030,.573],[-.044,.534]];
-function bridgeRailing(parent,m,c,a,b,u,baseOffset=0){
-  const width=.14,height=.18,t=.006;
-  // Four steel plates form each rectangular HSS, including visible hollow ends.
-  for(const centre of [.34,.68,1.01])for(const section of [
-    rect(u-width/2,u+width/2,centre+height/2,centre+height/2-t),
-    rect(u-width/2,u+width/2,centre-height/2+t,centre-height/2),
-    rect(u-width/2,u-width/2+t,centre+height/2-t,centre-height/2+t),
-    rect(u+width/2-t,u+width/2,centre+height/2-t,centre-height/2+t)
-  ])parent.add(sweep(c,a,b,section,m.railing,(_,q)=>profile(c,q)+baseOffset));
-  const count=Math.max(1,Math.ceil((b-a)/2.5));
-  for(let j=0;j<=count;j++){
-    const q=supportStation(c,a+(b-a)*j/count,u),p=frame(c,q,u),y=profile(c,q)+baseOffset,angle=-Math.atan2(p.tz,p.tx);
-    box(parent,m.railing,p.x,y+.018,p.z,.28,.036,.26,angle);
-    for(const side of [-1,1]){
-      box(parent,m.railing,p.x+side*.067*p.tx,y+.51,p.z+side*.067*p.tz,.006,.99,.12,angle);
-      box(parent,m.railing,p.x+side*.057*p.nx,y+.51,p.z+side*.057*p.nz,.128,.99,.006,angle);
-    }
-    for(const x of [-.10,.10])for(const z of [-.085,.085])box(parent,m.dark,p.x+x*p.tx+z*p.nx,y+.045,p.z+x*p.tz+z*p.nz,.025,.018,.025,angle);
-    if(j%2===0)box(parent,m.reflector,p.x,y+.82,p.z-Math.sign(u)*.09,.13,.06,.012,angle);
+function bridgeRailing(parent,m,c,a,b,edge,side,type,baseOffset=0){
+  const u=edge-side*.18,height=type==='210A'?.87:1.4,curb=[[edge,0],[edge-side*.45,0],[edge-side*.38,.28],[edge-side*.07,.28]];
+  if(side<0)curb.reverse();parent.add(sweep(c,a,b,curb,m.edge,(_,q)=>profile(c,q)+baseOffset));
+  const rail=(y,w=.14,h=.12)=>{const top=.28+y+h/2,bottom=.28+y-h/2,t=.006;for(const section of [rect(u-w/2,u+w/2,top,top-t),rect(u-w/2,u+w/2,bottom+t,bottom),rect(u-w/2,u-w/2+t,top-t,bottom+t),rect(u+w/2-t,u+w/2,top-t,bottom+t)])parent.add(sweep(c,a,b,section,m.railing,(_,q)=>profile(c,q)+baseOffset));};
+  if(type==='20C'){rail(.08,.08,.05);rail(1.38,.08,.05);}else{
+    for(const y of [.18,.51,.81])rail(Math.min(y,height-.06));
+    if(type==='210C')rail(1.38,.05,.05);
   }
+  const posts=[a];for(let q=a+3;q<b-.01;q+=3)posts.push(q);if(posts.at(-1)!==b)posts.push(b);
+  for(const q of posts){
+    const s=supportStation(c,q,u),p=frame(c,s,u),y=profile(c,s)+baseOffset+.28,angle=-Math.atan2(p.tz,p.tx);
+    box(parent,m.railing,p.x,y+height/2,p.z,.09,height,.09,angle);
+    box(parent,m.dark,p.x,y+.02,p.z,.15,.035,.15,angle);
+  }
+  if(type==='20C')for(let q=a+.1;q<b-.05;q+=.1){
+    const s=supportStation(c,q,u),p=frame(c,s,u),angle=-Math.atan2(p.tz,p.tx);
+    box(parent,m.railing,p.x,profile(c,s)+baseOffset+.28+.73,p.z,.018,1.31,.018,angle);
+  }
+}
+function profiledSupportWall(parent,mat,c,station,u0,u1,thickness,bottomAt,topAt){
+  const triangles=[],steps=Math.max(1,Math.ceil((u1-u0)/.4)),ring=u=>{
+    const p=supportBasis(c,station,u),d=thickness/2;
+    if(!mat.userData.chamfer)return [[p.x-p.tx*d,topAt(u,-d),p.z-p.tz*d],[p.x+p.tx*d,topAt(u,d),p.z+p.tz*d],[p.x+p.tx*d,bottomAt(u,d),p.z+p.tz*d],[p.x-p.tx*d,bottomAt(u,-d),p.z-p.tz*d]];
+    const bevel=.015,at=(along,y)=>[p.x+p.tx*along,y,p.z+p.tz*along];
+    return [at(-d+bevel,topAt(u,-d+bevel)),at(d-bevel,topAt(u,d-bevel)),at(d,topAt(u,d)-bevel),at(d,bottomAt(u,d)+bevel),at(d-bevel,bottomAt(u,d-bevel)),at(-d+bevel,bottomAt(u,-d+bevel)),at(-d,bottomAt(u,-d)+bevel),at(-d,topAt(u,-d)-bevel)];
+  };
+  const face=(a,b,d,e)=>{triangles.push(...a,...b,...d,...a,...d,...e);};
+  let previous=ring(u0);
+  for(let j=1;j<=steps;j++){const next=ring(u0+(u1-u0)*j/steps);for(let k=0;k<previous.length;k++)face(previous[k],next[k],next[(k+1)%previous.length],previous[(k+1)%previous.length]);previous=next;}
+  for(const [u,reverse] of [[u0,true],[u1,false]]){const r=ring(u);for(let k=1;k<r.length-1;k++)triangles.push(...r[0],...(reverse?r[k+1]:r[k]),...(reverse?r[k]:r[k+1]));}
+  const geometry=new T.BufferGeometry();geometry.setAttribute('position',new T.Float32BufferAttribute(triangles,3));geometry.computeVertexNormals();const mesh=new T.Mesh(geometry,mat);mesh.castShadow=mesh.receiveShadow=true;parent.add(mesh);return mesh;
 }
 function roadsideGuardrail(parent,m,c,a,b,u,road){
   const local=road?{...c,curved:false,skew:0,variableDepth:false,profile:'constant',elevation:road.elevation,grade:0,spans:[{length:0}]}:c;
@@ -254,7 +278,7 @@ function bearingY(c,i,station,u=0){const actual=supportStation(c,station,u);retu
 function seeded(seed){return ()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};}
 
 export function buildBridge(c,m,{batch=true}={}) {
-  const fills=approachSurfaces(c);
+  const preview=approachSurfaces(c),L0=totalLength(c),extent=Math.max(L0+2*c.approach+36,...preview.flat().map(p=>2*Math.abs(p[0])+8)),fills=approachSurfaces(c,extent);
   m.steel.color.set(steelFinishes[c.steelColor]??c.steelColor);m.steel.metalness=c.steelColor==='weathered'?.03:.22;m.steel.roughness=c.steelColor==='weathered'?.92:.58;m.steel.userData.weathered.value=c.steelColor==='weathered'?1:0;
   const root=new T.Group(),deck=new T.Group(),structure=new T.Group(),setting=new T.Group();
   root.name='BridgeSketch 3D';deck.name='Deck and barriers';structure.name='Girders and supports';setting.name='Environment';root.add(deck,structure,setting);
@@ -266,20 +290,23 @@ export function buildBridge(c,m,{batch=true}={}) {
     const section=c.medianType==='barrier'?[[-.3,0],[-.3,.12],[-.16,.42],[-.12,1.1],[.12,1.1],[.16,.42],[.3,.12],[.3,0]].map(([u,y])=>[u+layout.medianCentre,y]):rect(layout.medianMin,layout.medianMax,.2,0);
     const median=addSweep(deck,a,b,section,m.concrete);median.name='Centre median';
   };
+  const addBarrier=(a,b,edge,side,type,raised=0)=>{
+    if(type!=='concrete'){bridgeRailing(deck,m,c,a,b,edge,side,type,raised);return;}
+    const section=[[0,0],[-.45,0],[-.45,.10],[-.23,.35],[-.18,c.barrier],[-.02,c.barrier],[0,.15]].map(([u,v])=>[edge+side*u,v]);
+    if(side<0)section.reverse();addSweep(deck,a,b,chamferSection(section),m.edge,(_,s)=>profile(c,s)+raised);
+  };
   const addBoxGirder=(group,a,b,u)=>{const box=boxGirder(c,a,b,u,m.steel);for(const mesh of [...box.children])group.add(mesh);};
   c.spans.forEach((span,i)=>{
       const a=ss[i]+(c.continuous?0:.025),b=ss[i+1]-(c.continuous?0:.025);
     if(c.material==='slab')structure.add(slabMesh(c,a,b,m.concrete));
     else addSweep(deck,a,b,rect(-half,half,-c.asphalt,-c.asphalt-c.deck),m.concrete);
-    addSweep(deck,a,b,rect(-half,half,0,-c.asphalt),m.asphalt);
+    addSweep(deck,a,b,rect(-half,half,0,-c.asphalt),c.laneCount?m.asphalt:m.concrete);
     if(leftSide)addSweep(deck,a,b,rect(-half,roadMin,.2,0),m.concrete);
     if(rightSide)addSweep(deck,a,b,rect(roadMax,half,.2,0),m.concrete);
-    for(const side of [-1,1]){
-      const edge=side*half;
-      if(c.barrierType==='concrete'){
-        const section=[[0,0],[-.45,0],[-.45,.10],[-.23,.35],[-.18,c.barrier],[-.02,c.barrier],[0,.15]].map(([u,v])=>[edge+side*u,v]);
-        if(side<0)section.reverse();const raised=((side<0&&leftSide)||(side>0&&rightSide))?.2:0;addSweep(deck,a,b,section,m.edge,(_,s)=>profile(c,s)+raised);
-      }else {const railBase=((side<0&&leftSide)||(side>0&&rightSide)) ? .2 : 0;bridgeRailing(deck,m,c,a,b,side*(half-.16),railBase);}
+    for(const side of [-1,1])addBarrier(a,b,side*half,side,side<0?c.leftRailing:c.rightRailing,((side<0&&leftSide)||(side>0&&rightSide))?.2:0);
+    if(c.sidewalkRailing!=='none'){
+      if(leftSide)addBarrier(a,b,roadMin-layout.innerBarrier,-1,c.sidewalkRailing,.2);
+      if(rightSide)addBarrier(a,b,roadMax+layout.innerBarrier,1,c.sidewalkRailing,.2);
     }
     addMedian(a,b);
     for(const u of layout.laneEdges)addSweep(deck,a,b,rect(u-.05,u+.05,.011,.003),m.white);
@@ -289,26 +316,27 @@ export function buildBridge(c,m,{batch=true}={}) {
         if(c.material==='box')addBoxGirder(structure,a+.22,b-.22,u);else {const section=(c.material==='concrete'?nebtSection(c.depth):steelSection(c.depth,c.web)).map(([x,y])=>[x+u,y]);const top=(_,s,v,u)=>girderTop(c,i,s)+(c.material==='steel'&&v<-.05?c.depth-girderDepth(c,s,u):0);const girder=addSweep(structure,a+.22,b-.22,section,c.material==='concrete'?m.concrete:m.steel,top,c.material==='concrete'?1:undefined);girder.name=`Span ${i+1} girder ${g+1}`;}
       }
       // Fill from the straight girder chord to the deck profile.
-      const haunchHeight=(_,s,v)=>v===0?profile(c,s)-c.asphalt-c.deck:girderTop(c,i,s)+1;
-      addSweep(haunches,a+(c.continuous?0:.22),b-(c.continuous?0:.22),rect(u-(c.material==='box'?c.boxTopWidth/2:.19),u+(c.material==='box'?c.boxTopWidth/2:.19),0,-1),m.concrete,haunchHeight);
+      const haunchHeight=(_,s,v)=>v>-.5?profile(c,s)-c.asphalt-c.deck:girderTop(c,i,s)+1;
+      const haunchesAt=c.material==='box'?[-c.boxTopWidth/2+.25,c.boxTopWidth/2-.25]:[0];
+      for(const offset of haunchesAt)addSweep(haunches,a+(c.continuous?0:.22),b-(c.continuous?0:.22),chamferSection(rect(u+offset-.19,u+offset+.19,0,-1)),m.concrete,haunchHeight);
     }
     for(let s=a+1.2;s<b&&c.material!=='slab';s+=Math.max(5,(b-a-2.4)/3))for(let g=0;g<c.girders-1;g++){
       const u=-half+c.overhang+g*gspace,top=girderTop(c,i,s)-.13,bot=top-Math.min(girderDepth(c,s,u),girderDepth(c,s,u+gspace))+.26;
       if(c.material==='steel'||c.material==='box'){
         const topInset=c.material==='box'?c.boxTopWidth/2-.13/4:.06,bottomInset=c.material==='box'?c.boxTopWidth/2-(top-bot+.13)/4:.06;
         const joints=[[u+topInset,top],[u+gspace-topInset,top],[u+bottomInset,bot],[u+gspace-bottomInset,bot]];
-        for(const [a,b,offset] of [[0,1,0],[2,3,0],[0,3,-.035],[2,1,.035]])bracingMember(structure,m.steel,point(c,s+offset,...joints[a]),point(c,s+offset,...joints[b]));
+        for(const [a,b,offset] of [[0,1,0],[2,3,0],[0,3,-.035],[2,1,.035]])bracingMember(structure,m.steel,supportPoint(c,s+offset,...joints[a]),supportPoint(c,s+offset,...joints[b]));
         const f=frame(c,s);
         for(const [k,[v,y]] of joints.entries()){
-          const side=k%2===0?1:-1,vertical=k<2?-1:1,p=point(c,s,v,y),q=point(c,s,v+side*.32,y),r=point(c,s,v,y+vertical*.3),positions=[];
+          const side=k%2===0?1:-1,vertical=k<2?-1:1,p=supportPoint(c,s,v,y),q=supportPoint(c,s,v+side*.32,y),r=supportPoint(c,s,v,y+vertical*.3),positions=[];
           for(const t of [-.018,.018])for(const a of [p,q,r])positions.push(a[0]+f.tx*t,a[1],a[2]+f.tz*t);
           const plate=new T.BufferGeometry();plate.setAttribute('position',new T.Float32BufferAttribute(positions,3));plate.setIndex([0,2,1,3,4,5,0,1,4,0,4,3,1,2,5,1,5,4,2,0,3,2,3,5]);plate.computeVertexNormals();
           const mesh=new T.Mesh(plate,m.steel);mesh.castShadow=mesh.receiveShadow=true;mesh.name='Bracing gusset';structure.add(mesh);
           for(const [dv,dy] of [[.07,.06],[.19,.045],[.05,.18]]){
-            const p=point(c,s,v+side*dv,y+vertical*dy),bolt=new T.Mesh(new T.CylinderGeometry(.023,.023,.052,6),m.dark);bolt.position.set(...p);bolt.quaternion.setFromUnitVectors(new T.Vector3(0,1,0),new T.Vector3(f.tx,0,f.tz));bolt.name='Gusset bolt';structure.add(bolt);
+            const p=supportPoint(c,s,v+side*dv,y+vertical*dy),bolt=new T.Mesh(new T.CylinderGeometry(.023,.023,.052,6),m.dark);bolt.position.set(...p);bolt.quaternion.setFromUnitVectors(new T.Vector3(0,1,0),new T.Vector3(f.tx,0,f.tz));bolt.name='Gusset bolt';structure.add(bolt);
           }
         }
-      }else beam(structure,m.concrete,point(c,s,u,top-c.depth*.4),point(c,s,u+gspace,top-c.depth*.4),.25,c.depth*.52);
+      }else beam(structure,m.concrete,supportPoint(c,s,u,top-c.depth*.4),supportPoint(c,s,u+gspace,top-c.depth*.4),.25,c.depth*.52);
     }
     if(c.showTraffic)layout.laneCenters.forEach((u,lane)=>{
       const type=vehicleKinds[(i*c.laneCount+lane+c.seed)%vehicleKinds.length],s=a+(b-a)*(lane%2?.65:.35);
@@ -326,12 +354,17 @@ export function buildBridge(c,m,{batch=true}={}) {
       wallBetween(structure,m.concrete,supportPoint(c,s,-half+.15,0),supportPoint(c,s,half-.15,0),1.8,earth,top);
       // Wing/return walls use the actual skewed support line and bridge tangent.
       const direction=j===0?-1:1;
-      wallBetween(structure,m.concrete,supportPoint(c,s+direction*.8,-half+.15,0),supportPoint(c,s+direction*.8,half-.15,0),.4,top,Math.max(top+.2,profile(c,s)-c.asphalt));
+      const backwall=profiledSupportWall(structure,m.concrete,c,s+direction*.8,-half+.15,half-.15,.4,()=>top,(u,offset)=>Math.max(top+.2,profile(c,supportStation(c,s+direction*.8,u)+offset)-.17));backwall.name='Profile-following backwall';
+      if(c.frontSlope){
+        const reach=Math.min(8,Math.min(...c.spans.map(span=>span.length))/4),end=s-direction*reach;
+        const slope=sweep(c,Math.min(s,end),Math.max(s,end),rect(-half+.15,half-.15,0,earth-top),c.frontSlopeMaterial==='stone'?m.stone:c.frontSlopeMaterial==='concrete'?m.concrete:m.grass,(_,station,v,u)=>v===0?top-Math.abs(station-supportStation(c,s,u))/2:top,Math.ceil(reach*2));
+        slope.name='Slope in front of abutment';setting.add(slope);
+      }
       for(const side of [-1,1]){
         const u=side*(half-.3),p0=supportPoint(c,s,u,0),f=frame(c,supportStation(c,s,u),u),a=(c.abutmentType==='wing'?c.wingAngle:0)*Math.PI/180;
         const corner=fills.corners.find(p=>p.end===s&&p.side===side),length=Math.max(6,Math.abs(corner.station-s));
         if(c.abutmentType==='return'){
-          const end=s+direction*length,wall=sweep(c,Math.min(s,end),Math.max(s,end),rect(u-.225,u+.225,0,earth),m.concrete,(_,station,v)=>v===0?profile(c,station)-.17:0,Math.ceil(length));
+          const end=s+direction*length,wall=sweep(c,Math.min(s,end),Math.max(s,end),chamferSection(rect(u-.225,u+.225,0,earth)),m.concrete,(_,station,v)=>v>earth+.1?profile(c,station)-.17:0,Math.ceil(length));
           wall.name=`Return wall ${j===0?'start':'end'} ${side<0?'left':'right'}`;structure.add(wall);
         }else{
           const vx=direction*f.tx*Math.cos(a)+side*f.nx*Math.sin(a),vz=direction*f.tz*Math.cos(a)+side*f.nz*Math.sin(a),p1=[p0[0]+vx*length,0,p0[2]+vz*length];
@@ -340,13 +373,15 @@ export function buildBridge(c,m,{batch=true}={}) {
       }
     }else if(c.pierType==='wall'){
       wallBetween(structure,m.concrete,supportPoint(c,s,-half+.15,0),supportPoint(c,s,half-.15,0),c.wallThickness,earth,top);
-      wallBetween(structure,m.concrete,supportPoint(c,s,-half+.15,0),supportPoint(c,s,half-.15,0),1.9,top-.4,top);
+      wallBetween(structure,m.concrete,supportPoint(c,s,-half+.15,0),supportPoint(c,s,half-.15,0),c.wallThickness,top-.4,top);
     }else{
       const capHeight=c.pierType==='hammerhead'?c.hammerheadThickness:c.bentThickness;
-      const cap=wallBetween(structure,m.concrete,supportPoint(c,s,-half+.15,0),supportPoint(c,s,half-.15,0),c.pierType==='bent'?c.bentWidth:1.9,top-capHeight,top);cap.name='Pier cap';
+      const capWidth=c.pierType==='bent'?c.bentWidth:c.hammerheadThickness;
+      const capDepthAt=u=>{const edge=(half-.15)*.65,t=Math.max(0,Math.min(1,(Math.abs(u)-edge)/((half-.15)-edge)));return c.bentThickness+(c.bentEndThickness-c.bentThickness)*t*t*(3-2*t);};
+      const cap=c.pierType==='bent'&&c.bentEndThickness!==c.bentThickness?profiledSupportWall(structure,m.concrete,c,s,-half+.15,half-.15,capWidth,u=>top-capDepthAt(u),()=>top):wallBetween(structure,m.concrete,supportPoint(c,s,-half+.15,0),supportPoint(c,s,half-.15,0),capWidth,top-capHeight,top);cap.name='Pier cap';
       const us=c.pierType==='hammerhead'||c.columns===1?[0]:Array.from({length:c.columns},(_,n)=>-c.width*.32+n*c.width*.64/(c.columns-1));
       for(const u of us){
-        const f=supportBasis(c,s,u),height=top-capHeight-earth;
+        const f=supportBasis(c,s,u),height=top-(c.pierType==='bent'?capDepthAt(u):capHeight)-earth;
         if(c.pierType==='hammerhead'){
           // Box local X follows the support line; skew is not added a second time.
           const head=box(structure,m.concrete,f.x,earth+height/2,f.z,c.hammerheadWidth,height,c.hammerheadThickness,f.angle);
@@ -372,12 +407,13 @@ export function buildBridge(c,m,{batch=true}={}) {
   });
   const sceneHalf=L/2+c.approach+18;
   for(const [a,b] of fills.ranges){
-    addSweep(deck,a,b,rect(-half,half,0,-.17),m.asphalt);
+    addSweep(deck,a,b,rect(-half,half,0,-.17),c.laneCount?m.asphalt:m.concrete);
     if(leftSide)addSweep(deck,a,b,rect(-half,roadMin,.2,0),m.concrete);
     if(rightSide)addSweep(deck,a,b,rect(roadMax,half,.2,0),m.concrete);
     for(const u of layout.laneEdges)addSweep(deck,a,b,rect(u-.05,u+.05,.011,.003),m.white);
     addMedian(a,b);
-    for(const u of [-half+.05,half-.05])roadsideGuardrail(deck,m,c,a,b,u);
+    if(c.laneCount)for(const u of [-half+.05,half-.05])roadsideGuardrail(deck,m,c,a,b,u);
+    else for(const side of [-1,1])addBarrier(a,b,side*half,side,side<0?c.leftRailing:c.rightRailing);
   }
   const waters=addEnvironment(c,m,setting,fills);
   const vehicles=[deck,setting].flatMap(group=>group.children.find(o=>o.name==='Traffic')?.children??[]);
@@ -426,8 +462,9 @@ function terrainSampler(c){
 }
 // Shared surfaces drive both the visible fill and scenery exclusion. Every radial
 // generator falls one metre for two metres of horizontal run, to actual terrain.
-export function approachSurfaces(c){
-  const L=totalLength(c),half=c.width/2+.6,ground=terrainSampler(c),surfaces=[];
+export function approachSurfaces(c,extent=0){
+  const L=totalLength(c),half=c.width/2-.55,ground=terrainSampler(c),surfaces=[];
+  surfaces.extent=extent;
   surfaces.corners=[];surfaces.ranges=[];
   const apex=(station,u)=>{const s=supportStation(c,station,u),f=frame(c,s,u);return {f,p:[f.x,profile(c,s)-.17,f.z]};};
   const toe=(p,dx,dz)=>{
@@ -438,7 +475,7 @@ export function approachSurfaces(c){
   for(const [end,toward] of [[0,1],[L,-1]]){
     const f=frame(c,end),k=Math.tan(c.skew*Math.PI/180);
     const intrusion=p=>toward*((p[0]-f.x)*(f.tx-k*f.nx)+(p[2]-f.z)*(f.tz-k*f.nz));
-    const corners=[];
+    const corners=[],frontReach=c.frontSlope?Math.min(8,Math.min(...c.spans.map(s=>s.length))/4):0;
     for(const side of [-1,1]){
       const cone=setback=>{
         const station=end-toward*setback,{p,f}=apex(station,half*side),ring=[];
@@ -447,24 +484,26 @@ export function approachSurfaces(c){
       };
       // Move the crest back, never flatten the 2:1 slope: its foremost toe
       // lands on the abutment plane, including skew and curved alignment.
-      let lo=0,hi=8;while(cone(hi).intrusion>0&&hi<512)hi*=2;
-      for(let i=0;i<24;i++){const mid=(lo+hi)/2;if(cone(mid).intrusion>0)lo=mid;else hi=mid;}
+      let lo=0,hi=8;while(cone(hi).intrusion>frontReach&&hi<512)hi*=2;
+      for(let i=0;i<24;i++){const mid=(lo+hi)/2;if(cone(mid).intrusion>frontReach)lo=mid;else hi=mid;}
       const corner=cone(hi);corners.push(corner);surfaces.corners.push(corner);
     }
-    const outer=end-toward*Math.max(c.approach+18,...corners.map(p=>Math.abs(p.station-end)+8));
+    let outer=end-toward*Math.max(c.approach+18,...corners.map(p=>Math.abs(p.station-end)+8));
+    if(extent){const target=end===0?-extent/2:extent/2,at=frame(c,outer);outer+=(target-at.x)/Math.max(.1,at.tx);}
     const a=Math.min(outer,end),b=Math.max(outer,end);surfaces.ranges.push([a,b]);
     const local=[];
     for(let s=a;s<b;s+=1){const t=Math.min(b,s+1);local.push([apex(s,-half).p,apex(s,half).p,apex(t,half).p,apex(t,-half).p]);}
     for(const corner of corners){
       const side=corner.side,a=Math.min(outer,corner.station),b=Math.max(outer,corner.station);
       for(let s=a;s<b;s+=1){const p=apex(s,half*side),q=apex(Math.min(b,s+1),half*side);local.push([p.p,q.p,toe(q.p,q.f.nx*side,q.f.nz*side),toe(p.p,p.f.nx*side,p.f.nz*side)]);}
-      for(let i=0;i<24;i++)local.push([corner.p,corner.ring[i],corner.ring[i+1]]);
+      for(let i=0;i<24;i++){const cone=[corner.p,corner.ring[i],corner.ring[i+1]];cone.finish=c.approachConeMaterial==='stone'?'stone':c.frontSlope?c.frontSlopeMaterial:'grass';local.push(cone);}
     }
     // Clip numerical/curve overshoot at the same abutment plane.
     for(const face of local){
       const clipped=[];
-      for(let i=0;i<face.length;i++){const p=face[i],q=face[(i+1)%face.length],dp=intrusion(p),dq=intrusion(q);if(dp<=1e-7)clipped.push(p);if((dp>1e-7)!==(dq>1e-7)){const t=dp/(dp-dq);clipped.push(p.map((v,j)=>v+t*(q[j]-v)));}}
-      if(clipped.length>=3)surfaces.push(clipped);
+      const limit=face.finish?frontReach:0;
+      for(let i=0;i<face.length;i++){const p=face[i],q=face[(i+1)%face.length],dp=intrusion(p)-limit,dq=intrusion(q)-limit;if(dp<=1e-7)clipped.push(p);if((dp>1e-7)!==(dq>1e-7)){const t=dp/(dp-dq);clipped.push(p.map((v,j)=>v+t*(q[j]-v)));}}
+      if(clipped.length>=3){clipped.finish=face.finish??'grass';surfaces.push(clipped);}
     }
   }
   return surfaces;
@@ -518,14 +557,15 @@ export function crossingCorridors(c,extent=totalLength(c)+2*c.approach+36,halfZ=
   return zones;
 }
 function addEnvironment(c,m,parent,fills){
-  const L=totalLength(c),ss=stations(c),points=fills.flat(),extent=Math.max(L+2*c.approach+36,...points.map(p=>2*Math.abs(p[0])+8)),halfZ=Math.max(c.sceneWidth/2,...points.map(p=>Math.abs(p[2])+8)),rng=seeded(c.seed),obstacles=[],waters=[],ground=c.terrainMode==='snow'?m.snow:m.grass,riverReach=Math.hypot(extent/2,halfZ)+8,riverSteps=Math.ceil(riverReach);
-  const fillPos=[];
-  for(const p of fills)for(let i=1;i<p.length-1;i++){
+  const L=totalLength(c),ss=stations(c),points=fills.flat(),extent=fills.extent||Math.max(L+2*c.approach+36,...points.map(p=>2*Math.abs(p[0])+8)),halfZ=Math.max(c.sceneWidth/2,...points.map(p=>Math.abs(p[2])+8)),rng=seeded(c.seed),obstacles=[],waters=[],ground=c.terrainMode==='snow'?m.snow:m.grass,riverReach=Math.hypot(extent/2,halfZ)+8,riverSteps=Math.ceil(riverReach);
+  for(const finish of ['grass','stone','concrete']){
+   const fillPos=[];
+   for(const p of fills.filter(face=>face.finish===finish))for(let i=1;i<p.length-1;i++){
     const a=p[0],b=p[i],d=p[i+1],up=(b[2]-a[2])*(d[0]-a[0])-(b[0]-a[0])*(d[2]-a[2]);
     fillPos.push(...a,...(up>=0?b:d),...(up>=0?d:b));
+   }
+   if(fillPos.length){const fillGeometry=new T.BufferGeometry();fillGeometry.setAttribute('position',new T.Float32BufferAttribute(fillPos,3));const uv=[];for(let i=0;i<fillPos.length;i+=3)uv.push(fillPos[i]/2,fillPos[i+2]/2);fillGeometry.setAttribute('uv',new T.Float32BufferAttribute(uv,2));fillGeometry.computeVertexNormals();const fill=new T.Mesh(fillGeometry,finish==='stone'?m.stone:finish==='concrete'?m.concrete:ground);fill.name='2H:1V approach '+finish;fill.receiveShadow=true;fill.castShadow=true;parent.add(fill);}
   }
-  const fillGeometry=new T.BufferGeometry();fillGeometry.setAttribute('position',new T.Float32BufferAttribute(fillPos,3));fillGeometry.computeVertexNormals();
-  const fill=new T.Mesh(fillGeometry,ground);fill.name='2H:1V approach fills and quarter cones';fill.receiveShadow=true;fill.castShadow=true;parent.add(fill);
   c.spans.forEach((s,i)=>{if(s.obstacle!=='water')obstacles.push(crossing(c,(ss[i]+ss[i+1])/2,s.angle,s.width,s.elevation,s.obstacle));});
   for(const g of waterGroups(c)){
     const first=c.spans[g.startIndex],last=c.spans[g.endIndex];
@@ -552,7 +592,8 @@ function addEnvironment(c,m,parent,fills){
   // Border skirt follows the terrain edge, keeping the diorama watertight visually.
   const base=Math.min(-1.5,...c.spans.map(s=>s.elevation-1.5));
   for(const z of [-halfZ,halfZ])for(let x=-extent/2;x<extent/2;x+=2){const w=Math.min(2,extent/2-x),y=terrainHeight(x+w/2,z);box(parent,m.earth,x+w/2,(y+base)/2,z,w,y-base,.25);}
-  for(const x of [-extent/2,extent/2])for(let z=-halfZ;z<halfZ;z+=2){const d=Math.min(2,halfZ-z),y=terrainHeight(x,z+d/2);box(parent,m.earth,x,(y+base)/2,z+d/2,.25,y-base,d);}
+  for(const x of [-extent/2,extent/2])for(let z=-halfZ;z<halfZ;z+=2){const d=Math.min(2,halfZ-z),y=terrainHeight(x,z+d/2);box(parent,ground,x,(y+base)/2,z+d/2,.25,y-base,d);}
+  for(const [a,b] of fills.ranges){const station=a<0?a:b;profiledSupportWall(parent,ground,c,station,-c.width/2,c.width/2,.12,()=>base,u=>profile(c,supportStation(c,station,u))-.17);}
   box(parent,m.earth,0,base-.2,0,extent,.4,halfZ*2);
   let railIndex=0;
   for(const o of obstacles.filter(o=>o.type!=='water')){
@@ -572,10 +613,10 @@ function addEnvironment(c,m,parent,fills){
       }
       if(c.showTraffic){
         let traffic=parent.children.find(child=>child.name==='Traffic');if(!traffic){traffic=new T.Group();traffic.name='Traffic';parent.add(traffic);}
-        const index=(railIndex+c.seed)%tracks.length,style=c.trainStyle==='mixed'?['diesel','bullet','city'][(railIndex+c.seed)%3]:c.trainStyle;
+        const style=c.trainStyle==='mixed'?['diesel','bullet','city'][(railIndex+c.seed)%3]:c.trainStyle;
         const carCount=4+Math.floor(seeded(c.seed+railIndex*1009+137)()*9);
         const train=makeTrain(style,m.train,carCount),forward=(railIndex+c.seed)%2===0;
-        train.userData.route={s:(forward?-.33:.33)*halfLength,u:tracks[index],type:'train',forward,road:o,halfLength:train.userData.length/2,halfWidth:train.userData.width/2,verticalOffset:.22,speed:48,offscreenGap:40};
+        train.userData.route={s:(forward?-.33:.33)*halfLength,u:tracks.length===1?0:forward?tracks[1]:tracks[0],type:'train',forward,road:o,halfLength:train.userData.length/2,halfWidth:train.userData.width/2,verticalOffset:.22,speed:48,offscreenGap:40};
         positionVehicle(train,c);traffic.add(train);
       }
       railIndex++;

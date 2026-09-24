@@ -5,6 +5,7 @@ CC0 public-domain assets from Poly Haven, bundled locally. Older assets were con
 - Asphalt 01: https://polyhaven.com/a/asphalt_01 — Charlotte Baglioni / Dario Barresi; diffuse + normal, 2.1 m repeat.
 - Concrete Wall 009: https://polyhaven.com/a/concrete_wall_009 — Charlotte Baglioni; diffuse + normal, 1.8 m repeat.
 - Rough Concrete: https://polyhaven.com/a/rough_concrete — Dimitrios Savva; diffuse + OpenGL normal + roughness, used for bridge concrete.
+- Rock Ground: https://polyhaven.com/a/rock_ground — diffuse + OpenGL normal + roughness at 1K, used for optional stone-faced approach cones and front slopes.
 - Leafy Grass: https://polyhaven.com/a/leafy_grass — Charlotte Baglioni; diffuse, 2 m repeat.
 - License: https://polyhaven.com/license
 
