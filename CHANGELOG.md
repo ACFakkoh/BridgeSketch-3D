@@ -4,7 +4,7 @@
 
 - Backwall and return-wall tops follow the actual road profile under skew and curves; concrete edges receive 15 mm chamfers.
 - Bent caps can vary in depth at their ends; wall and hammerhead caps match their support thickness.
-- Variable-depth steel girders and concrete slabs retain a 400 mm constant section over bearings, including single spans with deeper abutment ends.
+- Variable-depth steel and concrete girders and concrete slabs retain a 400 mm constant section over bearings, including single spans with deeper abutment ends.
 - Steel boxes use two 500 × 50 mm top flanges; a single box and a pedestrian-only deck with zero lanes are supported.
 - Independent left and right railings: concrete, HSS 210A / 210C, or 20C pickets. Steel railings sit on trapezoidal 450 × 280 mm concrete curbs, with posts at 3 m. Optional traffic-side sidewalk protection is available.
 - Optional 2H:1V front-of-abutment slopes and quarter-cone stone facing, using a bundled CC0 Poly Haven rock texture. Approach fills reach the terrain cut and have closed grass-covered ends.

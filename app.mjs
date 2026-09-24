@@ -50,7 +50,7 @@ function syncWaterFields(){
 function syncEnabled(){
   const steel=config.material==='steel'||config.material==='box',box=config.material==='box',slab=config.material==='slab';$('nebt-label').hidden=steel||slab;$('steel-depth-label').hidden=!steel;$('slab-depth-label').hidden=!slab;$('steel-color-controls').hidden=!steel;$('flange-note').hidden=!steel;$('box-bottom-width-label')?.toggleAttribute('hidden',!box);
   for(const name of ['girders','overhang','haunch'])form.elements[name].disabled=slab||(box&&name==='overhang');
-  $('variable-depth-fields').hidden=!(steel||slab);form.elements.variableDepth.disabled=false;form.elements.pierDepth.disabled=!config.variableDepth;form.elements.taper.disabled=!config.variableDepth;form.elements.variableDepth.checked=config.variableDepth;form.elements.girders.step='1';$('girder-count-label').hidden=box||slab;$('box-count-label').hidden=!box;$('boxCount').value=config.girders;form.elements.girders.value=config.girders;
+  $('variable-depth-fields').hidden=false;form.elements.variableDepth.disabled=false;form.elements.pierDepth.disabled=!config.variableDepth;form.elements.taper.disabled=!config.variableDepth;form.elements.variableDepth.checked=config.variableDepth;form.elements.girders.step='1';$('girder-count-label').hidden=box||slab;$('box-count-label').hidden=!box;$('boxCount').value=config.girders;form.elements.girders.value=config.girders;
   form.elements.wingAngle.disabled=config.abutmentType!=='wing';$('wing-angle-label').hidden=config.abutmentType!=='wing';
   $('column-shape-label').hidden=config.pierType!=='bent';$('column-size-label').textContent=config.columnShape==='square'?'Column side · m':'Column diameter · m';
   form.elements.sidewalkWidth.disabled=config.sidewalkSide==='none';form.elements.sidewalkRailing.disabled=config.sidewalkSide==='none';$('median-width-label').hidden=config.medianType!=='sidewalk';
@@ -62,7 +62,7 @@ function syncEnabled(){
   $('continuity-note').textContent=slab?(config.continuous?'Continuous solid slab across supports.':'Solid slab spans with joints at supports.'):!config.continuous?'Separate girder spans with joints at piers.':steel?'Unbroken girders and one bearing line at each pier.':'Precast spans joined with concrete closure diaphragms.';
   form.elements.material.options[0].disabled=config.curved;form.elements.radius.disabled=!config.curved;form.elements.direction.disabled=!config.curved;
   form.elements.rise.disabled=config.profile!=='crest';form.elements.grade.disabled=config.profile!=='constant';
-  $('material-note').textContent=slab?(config.variableDepth?'Solid concrete slab · variable depth':'Solid concrete slab · constant depth'):box?'Hollow box · webs incline 1H:4V':steel?'Plate girder · depth includes both flanges':'Metric NEBT family · 1200 / 810 mm flanges';
+  $('material-note').textContent=slab?(config.variableDepth?'Solid concrete slab · variable depth':'Solid concrete slab · constant depth'):box?'Hollow box · webs incline 1H:4V':steel?'Plate girder · depth includes both flanges':config.variableDepth?'NEBT-shaped concrete concept · variable depth':'Metric NEBT family · 1200 / 810 mm flanges';
   const layout=roadLayout(config);$('shoulders').textContent=Math.abs(layout.leftShoulder-layout.rightShoulder)<.001?layout.leftShoulder.toFixed(2)+' m':layout.leftShoulder.toFixed(2)+' / '+layout.rightShoulder.toFixed(2)+' m';
 }
 function readForm(){
@@ -107,7 +107,7 @@ function renderSection(){
   if(c.material==='slab')drawing+=rectangle(-half,half,-.065,bottom,'#a7a49a');
   else{
     for(let g=0;g<c.girders;g++){
-      const u=-half+c.overhang+g*spacing(c),sections=c.material==='concrete'?[nebtSection(c.depth)]:c.material==='box'?Object.values(boxSection(actualDepth,c.boxTopWidth,c.boxBottomWidth,.05,c.web)):[steelSection(c.depth,c.web).map(([x,y])=>[x,y<-.05?y+c.depth-actualDepth:y])];
+      const u=-half+c.overhang+g*spacing(c),sections=c.material==='concrete'?[nebtSection(actualDepth)]:c.material==='box'?Object.values(boxSection(actualDepth,c.boxTopWidth,c.boxBottomWidth,.05,c.web)):[steelSection(c.depth,c.web).map(([x,y])=>[x,y<-.05?y+c.depth-actualDepth:y])];
       for(const section of sections)drawing+=poly(section.map(([x,y])=>[x+u,y+top]),c.material==='concrete'?'#aba79a':steelFinishes[c.steelColor]??c.steelColor);
       for(const offset of c.material==='box'?[-c.boxTopWidth/2+.25,c.boxTopWidth/2-.25]:[0])drawing+=rectangle(u+offset-.19,u+offset+.19,-.29,top,'#c0bdb1');
     }

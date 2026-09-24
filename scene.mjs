@@ -313,7 +313,7 @@ export function buildBridge(c,m,{batch=true}={}) {
     for(let g=0;g<(c.material==='slab'?0:c.girders);g++){
       const u=-half+c.overhang+g*gspace;
       if(!(c.continuous&&(c.material==='steel'||c.material==='box'))){
-        if(c.material==='box')addBoxGirder(structure,a+.22,b-.22,u);else {const section=(c.material==='concrete'?nebtSection(c.depth):steelSection(c.depth,c.web)).map(([x,y])=>[x+u,y]);const top=(_,s,v,u)=>girderTop(c,i,s)+(c.material==='steel'&&v<-.05?c.depth-girderDepth(c,s,u):0);const girder=addSweep(structure,a+.22,b-.22,section,c.material==='concrete'?m.concrete:m.steel,top,c.material==='concrete'?1:undefined);girder.name=`Span ${i+1} girder ${g+1}`;}
+        if(c.material==='box')addBoxGirder(structure,a+.22,b-.22,u);else {const section=c.material==='concrete'?station=>nebtSection(girderDepth(c,supportStation(c,station,u),u)).map(([x,y])=>[x+u,y]):steelSection(c.depth,c.web).map(([x,y])=>[x+u,y]);const top=(_,s,v,u)=>girderTop(c,i,s)+(c.material==='steel'&&v<-.05?c.depth-girderDepth(c,s,u):0);const girder=addSweep(structure,a+.22,b-.22,section,c.material==='concrete'?m.concrete:m.steel,top,c.material==='concrete'&&!c.variableDepth?1:undefined);girder.name=`Span ${i+1} girder ${g+1}`;}
       }
       // Fill from the straight girder chord to the deck profile.
       const haunchHeight=(_,s,v)=>v>-.5?profile(c,s)-c.asphalt-c.deck:girderTop(c,i,s)+1;

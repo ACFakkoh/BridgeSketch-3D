@@ -68,7 +68,6 @@ export function validate(raw) {
   // All entry points (controls, files, links and agent tools) enforce the same rule.
   if(c.curved&&c.material==='concrete') c.material='steel';
   if(typeof c.variableDepth!=='boolean') throw Error('Invalid variable-depth option.');
-  if(c.material!=='steel'&&c.material!=='box'&&c.material!=='slab') c.variableDepth=false;
   if(!['round','square'].includes(c.columnShape)) throw Error('Select round or square columns.');
   if(!['blue','white'].includes(c.background))throw Error('Select a blue or white background.');
   if(!['none','barrier','sidewalk'].includes(c.medianType)||typeof c.medianWidth!=='number'||!Number.isFinite(c.medianWidth)||c.medianWidth<.6||c.medianWidth>4)throw Error('Select a median type and an island width from 0.6 to 4 m.');
@@ -151,7 +150,7 @@ export function clearance(c,i) {
 }
 // Smooth bottom-flange haunches, measured from each girder's skewed pier intersection.
 export function girderDepth(c,s,u=0) {
-  if(!c.variableDepth||!['steel','box','slab'].includes(c.material))return c.material==='slab'?c.slabDepth:c.depth;
+  if(!c.variableDepth)return c.material==='slab'?c.slabDepth:c.depth;
   const typical=c.material==='slab'?c.slabDepth:c.depth;
   const bearingZone=.7; // Bearings are 0.5 m from supports; 0.3–0.7 m spans 400 mm above each pad.
   if(c.spans.length===1){
