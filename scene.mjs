@@ -144,6 +144,19 @@ export function sweep(c,a,b,section,mat,height=profile,segments) {
   const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(pos,3));g.setAttribute('uv',new T.Float32BufferAttribute(uv,2));g.setIndex(indices);g.computeVertexNormals();
   const mesh=new T.Mesh(g,mat);mesh.castShadow=true;mesh.receiveShadow=true;return mesh;
 }
+function clipMeshAtCut(mesh,target,start){
+  mesh.updateMatrixWorld(true);const bounds=new T.Box3().setFromObject(mesh);
+  if(start?bounds.min.x>=target-1e-6:bounds.max.x<=target+1e-6)return;
+  if(start?bounds.max.x<target:bounds.min.x>target){mesh.parent?.remove(mesh);mesh.geometry.dispose();return;}
+  const geometry=mesh.geometry,position=geometry.attributes.position,tex=geometry.attributes.uv,index=geometry.index,values=[],uv=[];
+  const read=k=>{const i=index?index.getX(k):k,p=new T.Vector3().fromBufferAttribute(position,i).applyMatrix4(mesh.matrixWorld);return {p:[p.x,p.y,p.z],uv:tex?[tex.getX(i),tex.getY(i)]:[0,0]};};
+  const distance=v=>start?target-v.p[0]:v.p[0]-target;
+  for(let i=0,n=index?index.count:position.count;i<n;i+=3){const face=[read(i),read(i+1),read(i+2)],clipped=[];
+    for(let j=0;j<3;j++){const p=face[j],q=face[(j+1)%3],dp=distance(p),dq=distance(q);if(dp<=1e-7)clipped.push(p);if((dp>1e-7)!==(dq>1e-7)){const t=dp/(dp-dq);clipped.push({p:p.p.map((v,k)=>v+t*(q.p[k]-v)),uv:p.uv.map((v,k)=>v+t*(q.uv[k]-v))});}}
+    for(let j=1;j<clipped.length-1;j++)for(const v of [clipped[0],clipped[j],clipped[j+1]]){values.push(...v.p);uv.push(...v.uv);}
+  }
+  const cut=new T.BufferGeometry();cut.setAttribute('position',new T.Float32BufferAttribute(values,3));cut.setAttribute('uv',new T.Float32BufferAttribute(uv,2));cut.computeVertexNormals();geometry.dispose();mesh.geometry=cut;mesh.position.set(0,0,0);mesh.quaternion.identity();mesh.scale.set(1,1,1);mesh.updateMatrixWorld(true);
+}
 export function boxGirder(c,a,b,u,mat){
   const group=new T.Group();group.name='Hollow steel box';
   for(const plate of ['topLeft','topRight','bottom','left','right']){
@@ -407,6 +420,7 @@ export function buildBridge(c,m,{batch=true}={}) {
   });
   const sceneHalf=L/2+c.approach+18;
   for(const [a,b] of fills.ranges){
+    const first=deck.children.length;
     addSweep(deck,a,b,rect(-half,half,0,-.17),c.laneCount?m.asphalt:m.concrete);
     if(leftSide)addSweep(deck,a,b,rect(-half,roadMin,.2,0),m.concrete);
     if(rightSide)addSweep(deck,a,b,rect(roadMax,half,.2,0),m.concrete);
@@ -414,6 +428,8 @@ export function buildBridge(c,m,{batch=true}={}) {
     addMedian(a,b);
     if(c.laneCount)for(const u of [-half+.05,half-.05])roadsideGuardrail(deck,m,c,a,b,u);
     else for(const side of [-1,1])addBarrier(a,b,side*half,side,side<0?c.leftRailing:c.rightRailing);
+    const start=a<0,target=start?-fills.extent/2:fills.extent/2;
+    for(const mesh of deck.children.slice(first))if(mesh.isMesh)clipMeshAtCut(mesh,target,start);
   }
   const waters=addEnvironment(c,m,setting,fills);
   const vehicles=[deck,setting].flatMap(group=>group.children.find(o=>o.name==='Traffic')?.children??[]);
@@ -489,7 +505,12 @@ export function approachSurfaces(c,extent=0){
       const corner=cone(hi);corners.push(corner);surfaces.corners.push(corner);
     }
     let outer=end-toward*Math.max(c.approach+18,...corners.map(p=>Math.abs(p.station-end)+8));
-    if(extent){const target=end===0?-extent/2:extent/2,at=frame(c,outer);outer+=(target-at.x)/Math.max(.1,at.tx);}
+    if(extent){
+      const target=end===0?-extent/2:extent/2,at=frame(c,outer);outer+=(target-at.x)/Math.max(.1,at.tx);
+      const edgeX=[-c.width/2,c.width/2].map(u=>frame(c,supportStation(c,outer,u),u).x);
+      const shortfall=end===0?Math.max(...edgeX)-target:target-Math.min(...edgeX);
+      outer+=(end===0?-1:1)*Math.max(0,shortfall+.05)/Math.max(.1,at.tx);
+    }
     const a=Math.min(outer,end),b=Math.max(outer,end);surfaces.ranges.push([a,b]);
     const local=[];
     for(let s=a;s<b;s+=1){const t=Math.min(b,s+1);local.push([apex(s,-half).p,apex(s,half).p,apex(t,half).p,apex(t,-half).p]);}
@@ -503,7 +524,11 @@ export function approachSurfaces(c,extent=0){
       const clipped=[];
       const limit=face.finish?frontReach:0;
       for(let i=0;i<face.length;i++){const p=face[i],q=face[(i+1)%face.length],dp=intrusion(p)-limit,dq=intrusion(q)-limit;if(dp<=1e-7)clipped.push(p);if((dp>1e-7)!==(dq>1e-7)){const t=dp/(dp-dq);clipped.push(p.map((v,j)=>v+t*(q[j]-v)));}}
-      if(clipped.length>=3){clipped.finish=face.finish??'grass';surfaces.push(clipped);}
+      let bounded=clipped;
+      if(extent){const target=end===0?-extent/2:extent/2,next=[];
+        for(let i=0;i<bounded.length;i++){const p=bounded[i],q=bounded[(i+1)%bounded.length],dp=end===0?target-p[0]:p[0]-target,dq=end===0?target-q[0]:q[0]-target;if(dp<=1e-7)next.push(p);if((dp>1e-7)!==(dq>1e-7)){const t=dp/(dp-dq);next.push(p.map((v,j)=>v+t*(q[j]-v)));}}bounded=next;
+      }
+      if(bounded.length>=3){bounded.finish=face.finish??'grass';surfaces.push(bounded);}
     }
   }
   return surfaces;
@@ -593,7 +618,18 @@ function addEnvironment(c,m,parent,fills){
   const base=Math.min(-1.5,...c.spans.map(s=>s.elevation-1.5));
   for(const z of [-halfZ,halfZ])for(let x=-extent/2;x<extent/2;x+=2){const w=Math.min(2,extent/2-x),y=terrainHeight(x+w/2,z);box(parent,m.earth,x+w/2,(y+base)/2,z,w,y-base,.25);}
   for(const x of [-extent/2,extent/2])for(let z=-halfZ;z<halfZ;z+=2){const d=Math.min(2,halfZ-z),y=terrainHeight(x,z+d/2);box(parent,ground,x,(y+base)/2,z+d/2,.25,y-base,d);}
-  for(const [a,b] of fills.ranges){const station=a<0?a:b;profiledSupportWall(parent,ground,c,station,-c.width/2,c.width/2,.12,()=>base,u=>profile(c,supportStation(c,station,u))-.17);}
+  for(const [a,b] of fills.ranges){
+    const start=a<0,target=start?-extent/2:extent/2,outer=start?a:b,section=[];
+    for(let j=0;j<=24;j++){const u=-c.width/2+c.width*j/24;let station=outer;
+      for(let k=0;k<5;k++){const actual=supportStation(c,station,u),x=frame(c,actual,u).x,delta=.01,derivative=(frame(c,supportStation(c,station+delta,u),u).x-x)/delta;station+=(target-x)/derivative;}
+      const actual=supportStation(c,station,u),p=frame(c,actual,u);section.push([[target,profile(c,actual)-.17,p.z],[target,base,p.z]]);
+    }
+    const vertices=[],uv=[];for(let j=0;j<section.length-1;j++){
+      const [p,q]=section[j],[r,t]=section[j+1],face=start?[p,t,r,p,q,t]:[p,r,t,p,t,q];
+      for(let k=0;k<face.length;k++){vertices.push(...face[k]);uv.push(face[k][2]/2,face[k][1]/2);}
+    }
+    const geometry=new T.BufferGeometry();geometry.setAttribute('position',new T.Float32BufferAttribute(vertices,3));geometry.setAttribute('uv',new T.Float32BufferAttribute(uv,2));geometry.computeVertexNormals();const cap=new T.Mesh(geometry,ground);cap.name='Grass-covered approach cut';cap.receiveShadow=true;parent.add(cap);
+  }
   box(parent,m.earth,0,base-.2,0,extent,.4,halfZ*2);
   let railIndex=0;
   for(const o of obstacles.filter(o=>o.type!=='water')){
