@@ -46,7 +46,7 @@ Mise à jour : 2026-09-25. Source de vérité pour les changements locaux et leu
 - [x] Tester les nouvelles options dans `check.mjs` et en navigateur : passage cyclistes↔voitures, 3 m avec quatre poutres et caisson unique, coupe transversale, rendu midi/coucher de soleil, console propre et export GLB réussi.
 - [x] Deuxième compte rendu Notion publié sous « Travail ATRL / Python projects / Bridge Sketch 3D » : [BridgeSketch 3D — R&D 0.5.0 et vérification](https://app.notion.com/p/3e6e798a151f819790f2e6e036e46a5a).
 - [x] Contrôler les archives GitHub Pages et hors ligne 0.5.0, le lanceur local, le préréglage passerelle dans le paquet, la console et le rendu visuel.
-- [ ] Pousser les nouvelles fonctionnalités 0.5.0 sur GitHub après vérification.
+- [x] Pousser les nouvelles fonctionnalités 0.5.0 sur GitHub après vérification : commit `192b05d`; la page publique sert `release.mjs` en version 0.5.0 (HTTP 200).
 
 ### Mesures et décisions préalables — 2026-09-24
 
@@ -63,3 +63,4 @@ Mise à jour : 2026-09-25. Source de vérité pour les changements locaux et leu
 - 0.4.1 a été publiée dans une session précédente.
 - 0.4.2 a été poussée en plusieurs commits jusqu'à `23bb6a4`.
 - 0.4.3 rassemble les ajustements de caisson, goussets, chasse-roue, coupe transversale et revêtements de talus. Tests, scénarios visuels, archives et démarrage hors ligne approuvés avant le push GitHub `d00a1bc`.
+- 0.5.0 ajoute la passerelle cyclable, les cyclistes, la rivière réfléchissante et les nuages dynamiques. Tests Node, interface, console, export, archives et page publique vérifiés avant et après le push GitHub `192b05d`.
