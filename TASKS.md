@@ -1,6 +1,6 @@
 # BridgeSketch 3D — suivi des travaux
 
-Mise à jour : 2026-09-24. Source de vérité pour les changements locaux et leur état de publication.
+Mise à jour : 2026-09-25. Source de vérité pour les changements locaux et leur état de publication.
 
 ## Correctifs 0.4.3
 
@@ -33,21 +33,33 @@ Mise à jour : 2026-09-24. Source de vérité pour les changements locaux et leu
 - [x] Archives 0.4.3 générées; contenu contrôlé et serveur hors ligne testé sur le paquet livré.
 - [x] Navigateur 0.4.3 : preset « Curved twin boxes » et coupe transversale chargés sans erreur de console.
 - [x] Compte rendu des correctifs publié sur Notion, sous « Travail ATRL / Python projects / Bridge Sketch 3D » : [TASKS — BridgeSketch 3D](https://app.notion.com/p/3e5e798a151f818b97b1fd28f197b45d).
-- [x] Correctifs 0.4.3 prêts pour publication sur GitHub après vérification locale complète; commit public précédent : `23bb6a4`.
+- [x] Correctifs 0.4.3 publiés sur GitHub après vérification locale complète : commit `d00a1bc9254fe6bd453220ec41a93e8ba203ac25`; métadonnées 0.4.3 servies par GitHub Pages (HTTP 200).
 
 ## Nouvelles fonctionnalités et R&D — après publication des correctifs
 
-- [ ] Comparer les bibliothèques d'herbe Three.js proposées, mesurer coût en triangles, appels de rendu et temps image avant intégration.
-- [ ] Comparer `threejs-water` au rendu d'eau actuel et décider si une option est justifiée par la qualité et les performances.
-- [ ] Ajouter des cyclistes en remplacement facultatif des voitures et camions, avec un style compatible avec les modèles existants et une source/licence vérifiée.
-- [ ] Vérifier les passerelles de 3 à 6 m : une voie cyclable, 2 à 4 poutres ou un seul caisson.
-- [ ] Étudier un ciel et des nuages dynamiques; évaluer `three-clouds.js` et l'utilité réelle de `3DTilesRendererJS` pour ce visualiseur.
-- [ ] Améliorer la couleur du coucher de soleil, la qualité de l'eau, les arbres et les textures en prenant les exemples Three.js fournis comme références visuelles.
-- [ ] Tester les nouvelles options en navigateur et dans `check.mjs`, puis mettre à jour ce journal.
-- [ ] Publier un deuxième compte rendu Notion, puis pousser les nouvelles fonctionnalités sur GitHub.
+- [x] Comparer les bibliothèques d'herbe Three.js proposées et estimer le budget géométrique avant intégration; maintenir la prairie instanciée existante.
+- [x] Comparer `threejs-water` au rendu actuel; offrir une option de rivière réfléchissante dans le shader existant, avec une seule passe de rendu d'eau.
+- [x] Ajouter des cyclistes bas-poly mobiles en remplacement facultatif des voitures et camions sur le tablier; modèles natifs cohérents avec le style Kenney après examen des sources disponibles.
+- [x] Vérifier les passerelles de 3 à 6 m : une voie cyclable de 1,8 m, 2 à 4 poutres acier ou un seul caisson; preset « Cycle footbridge » de 4,2 m.
+- [x] Étudier `@takram/three-clouds` et `3DTilesRendererJS`; ajouter une option de ciel nuageux procédural animé en un appel de rendu.
+- [x] Améliorer le coucher de soleil et la rivière; conserver les cartes de feuillage et de prairie existantes, dont le style est déjà compatible avec les références et le budget de scène.
+- [x] Tester les nouvelles options dans `check.mjs` et en navigateur : passage cyclistes↔voitures, 3 m avec quatre poutres et caisson unique, coupe transversale, rendu midi/coucher de soleil, console propre et export GLB réussi.
+- [x] Deuxième compte rendu Notion publié sous « Travail ATRL / Python projects / Bridge Sketch 3D » : [BridgeSketch 3D — R&D 0.5.0 et vérification](https://app.notion.com/p/3e6e798a151f819790f2e6e036e46a5a).
+- [x] Contrôler les archives GitHub Pages et hors ligne 0.5.0, le lanceur local, le préréglage passerelle dans le paquet, la console et le rendu visuel.
+- [ ] Pousser les nouvelles fonctionnalités 0.5.0 sur GitHub après vérification.
+
+### Mesures et décisions préalables — 2026-09-24
+
+- Scène rivière rurale 0.4.3, navigateur local : 483 814 triangles, 65 appels de rendu, 65 géométries, 1,4 ms CPU pour une image mesurée par `performance.now()` autour de `renderer.render`, reconstruction 419 ms. Ce temps CPU n'est pas une mesure GPU ni une moyenne FPS.
+- `three-stylized` : densité par défaut de 40 brins/m² et 4 segments par brin. Sur l'emprise nominale de 159 × 140 m, cela demanderait environ 890 000 brins avant masquage; même un masquage de 50 % laisserait environ 3,6 millions de triangles si chaque segment forme deux triangles. La scène actuelle plafonne à 60 000 touffes et en exclut les chaussées, cours d'eau et ouvrages. Ce calcul de budget précède toute intégration; il n'est pas un benchmark GPU de la bibliothèque. Conserver la végétation instanciée actuelle.
+- `stylized-components` : composants Next.js/React Three Fiber, GLB et shaders multiples; inadaptés au visualiseur Three.js statique autonome. Aucun composant intégré.
+- `threejs-water` : simulation d'ondes avec textures GPU ping-pong, caustiques et passes de réflexion/réfraction conçues pour un bassin; coût de plusieurs passes par image sur une scène qui tourne déjà continuellement avec rivière. Choix confirmé : variante d'eau réfléchissante dans le shader existant, sans cette dépendance.
+- `@takram/three-clouds` : nuages volumétriques et post-traitement, avec résultats publiés de 36–53 FPS en préréglage bas sur iPhone 13; coût trop élevé pour la scène de pont mobile. `3DTilesRendererJS` diffuse des tuiles géospatiales, sans fonction de génération de nuages. Ciel procédural Three.js intégré : un appel de rendu supplémentaire, sans cible intermédiaire.
+- Cyclistes : recherche Kenney/Poly Pizza/OpenGameArt. Le Car Kit Kenney fournit les voitures existantes, pas de cycliste prêt à l'emploi; modèle vélo + pilote bas-poly natif, intégré sans téléchargement et exportable en GLB.
+- Scène « Cycle footbridge » 0.5.0 : 400 010 triangles, 27 appels de rendu sans nuages et 28 avec nuages; reconstruction entre 159 et 185 ms sur les échantillons observés. Temps CPU par image mesurés entre 0,4 et 2,3 ms selon l'échantillon; ces valeurs ne sont ni des mesures GPU ni une garantie de FPS. L'option nuages ajoute un seul appel de rendu.
 
 ## Journal de publication
 
 - 0.4.1 a été publiée dans une session précédente.
 - 0.4.2 a été poussée en plusieurs commits jusqu'à `23bb6a4`.
-- 0.4.3 rassemble les ajustements de caisson, goussets, chasse-roue, coupe transversale et revêtements de talus. Les tests, les scénarios visuels, les archives et le démarrage hors ligne sont approuvés avant le push GitHub.
+- 0.4.3 rassemble les ajustements de caisson, goussets, chasse-roue, coupe transversale et revêtements de talus. Tests, scénarios visuels, archives et démarrage hors ligne approuvés avant le push GitHub `d00a1bc`.

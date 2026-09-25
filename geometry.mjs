@@ -3,7 +3,7 @@ export const defaults = {
   web:0.014, deck:0.225, slabDepth:0.8, asphalt:0.065, haunch:0.1, barrier:1.1,
   continuous:false, variableDepth:false, pierDepth:2.4, taper:30, steelColor:'brown',
   barrierType:'concrete', leftRailing:'concrete', rightRailing:'concrete', sidewalkRailing:'none', abutmentType:'return', wingAngle:30, laneCount:2, sidewalkSide:'none', sidewalkWidth:3, showTraffic:true, boxTopWidth:2.4, boxBottomWidth:1.7,
-  laneWidth:3.5, movingTraffic:true, bentWidth:1.9, bentThickness:1, bentEndThickness:1,
+  laneWidth:3.5, movingTraffic:true, trafficMode:'vehicles', waterStyle:'natural', skyMode:'clear', bentWidth:1.9, bentThickness:1, bentEndThickness:1,
   pierType:'bent', columns:2, columnShape:'round',
   columnDiameter:1.3, hammerheadWidth:2.4, hammerheadThickness:1.0, wallThickness:0.8,
   skew:0, curved:false, radius:250, direction:1,
@@ -56,8 +56,10 @@ export function validate(raw) {
   if(typeof c.steelColor==='string'&&/^#[0-9a-f]{6}$/i.test(c.steelColor))c.steelColor=c.steelColor.toUpperCase();
   if(!Object.hasOwn(raw,'boxBottomWidth'))c.boxBottomWidth=c.boxTopWidth-c.depth/2;
   Object.assign(c,{asphalt:.065,deck:.225,web:.014,barrier:1.1});
-  const limits={width:[4,30],overhang:[0.65,15],girders:[1,14],depth:[0.4,3],slabDepth:[.3,2],pierDepth:[0.4,5],taper:[10,45],columnDiameter:[0.35,3],hammerheadWidth:[1,8],hammerheadThickness:[0.35,2],wallThickness:[0.25,2],web:[0.008,0.08],deck:[0.15,0.6],asphalt:[0.025,0.2],haunch:[0.05,0.5],barrier:[0.8,1.5],wingAngle:[0,90],laneCount:[0,8],sidewalkWidth:[.5,6],boxTopWidth:[.8,15],boxBottomWidth:[.3,15],sceneWidth:[90,240],timeOfDay:[0,24],skew:[-45,45],radius:[80,5000],elevation:[3,30],rise:[0,3],grade:[-6,6],approach:[5,60],seed:[0,99999]};
-  Object.assign(limits,{laneWidth:[2.5,4.5],bentWidth:[.5,5],bentThickness:[.35,3],bentEndThickness:[.35,3]});
+  if(!['vehicles','cyclists'].includes(c.trafficMode)||!['natural','glossy'].includes(c.waterStyle)||!['clear','clouds'].includes(c.skyMode))throw Error('Select traffic, water and sky styles.');
+  const cycling=c.trafficMode==='cyclists';
+  const limits={width:[cycling?3:4,30],overhang:[cycling?.3:.65,15],girders:[1,14],depth:[0.4,3],slabDepth:[.3,2],pierDepth:[0.4,5],taper:[10,45],columnDiameter:[0.35,3],hammerheadWidth:[1,8],hammerheadThickness:[0.35,2],wallThickness:[0.25,2],web:[0.008,0.08],deck:[0.15,0.6],asphalt:[0.025,0.2],haunch:[0.05,0.5],barrier:[0.8,1.5],wingAngle:[0,90],laneCount:[0,8],sidewalkWidth:[.5,6],boxTopWidth:[.8,15],boxBottomWidth:[.3,15],sceneWidth:[90,240],timeOfDay:[0,24],skew:[-45,45],radius:[80,5000],elevation:[3,30],rise:[0,3],grade:[-6,6],approach:[5,60],seed:[0,99999]};
+  Object.assign(limits,{laneWidth:[cycling?1.5:2.5,4.5],bentWidth:[.5,5],bentThickness:[.35,3],bentEndThickness:[.35,3]});
   for(const [k,[lo,hi]] of Object.entries(limits)) if(typeof c[k]!=='number'||!Number.isFinite(c[k])||c[k]<lo||c[k]>hi) throw Error(`${k}: enter a number from ${lo} to ${hi}.`);
   if(typeof c.movingTraffic!=='boolean')throw Error('Invalid moving traffic option.');
   if(typeof c.frontSlope!=='boolean'||!['grass','stone','concrete'].includes(c.frontSlopeMaterial)||!['grass','stone'].includes(c.approachConeMaterial))throw Error('Invalid abutment slope finish.');

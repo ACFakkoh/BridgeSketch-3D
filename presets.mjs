@@ -63,6 +63,15 @@ export const presets = [
       barrierType:'steel',leftRailing:'210A',rightRailing:'210A',abutmentType:'return',wingAngle:35,environment:'rural',seed:56,
       laneWidth:3.5,movingTraffic:true,
       spans:[{length:36,obstacle:'rail',width:7,elevation:0,angle:65}]}
+  },
+  {
+    id:'cycle',label:'Cycle footbridge',
+    description:'A 4.2 m single-box cycle bridge with moving cyclists, reflective river and dynamic clouds.',
+    config:{...defaults,material:'box',trafficMode:'cyclists',skyMode:'clouds',waterStyle:'glossy',width:4.2,
+      girders:1,overhang:2.1,boxTopWidth:3,boxBottomWidth:1.7,depth:1.1,variableDepth:true,pierDepth:1.7,
+      laneCount:1,laneWidth:1.8,leftRailing:'20C',rightRailing:'20C',barrierType:'steel',
+      elevation:6.2,rise:.25,approach:18,environment:'rural',seed:48,
+      spans:[{length:28,obstacle:'water',width:15,elevation:0,angle:90}]}
   }
 ];
 

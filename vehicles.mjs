@@ -12,9 +12,11 @@ const finishes={
 };
 finishes.headlamp.emissive.set('#ffdf9d');finishes.headlamp.emissiveIntensity=.16;
 finishes.taillamp.emissive.set('#a52310');finishes.taillamp.emissiveIntensity=.15;
+const cyclistFinishes={skin:surface('#bb8865',.87),trousers:surface('#263d52',.88),helmet:surface('#d76b42',.48),spoke:surface('#87999d',.66,.35)};
 const templates=new Map();
 
 export function vehicleDimensions(type){
+  if(type==='cyclist')return {length:1.75,width:.68,height:1.8,halfLength:.95,halfWidth:.37};
   const d=type==='semi'?{length:13.3,width:2.74,height:3.78}:data[type==='car'?'sedan':type];
   if(!d)throw new Error(`Unknown vehicle: ${type}`);
   return {length:d.length,width:d.width,height:d.height,halfLength:d.length/2+.08,halfWidth:d.width/2+.06};
@@ -36,6 +38,7 @@ function modelParts(type){
 }
 
 export function createVehicleModel(type,paintMaterial,materials={}){
+  if(type==='cyclist')return createCyclistModel(paintMaterial);
   if(type==='car')type='sedan';
   const dimensions=vehicleDimensions(type),group=new T.Group(),paint=paintMaterial??finishes.paint;
   const material=name=>name==='paint'?paint:materials[`vehicle_${name}`]??finishes[name];
@@ -71,4 +74,32 @@ export function createVehicleModel(type,paintMaterial,materials={}){
     box('Rear underrun bar',material('metal'),-6.56,.53,0,.12,.16,2.12);
   }
   return group;
+}
+
+// Compact, flat-shaded bicycle and rider in the same low-poly scale as the Kenney traffic.
+function createCyclistModel(jersey=finishes.paint){
+  const g=new T.Group(),frame=finishes.metal,tyre=finishes.rubber,{skin,trousers,helmet,spoke}=cyclistFinishes;
+  const rod=(name,a,b,r,mat,segments=6)=>{const from=new T.Vector3(...a),to=new T.Vector3(...b),delta=to.clone().sub(from),mesh=new T.Mesh(new T.CylinderGeometry(r,r,delta.length(),segments),mat);mesh.name=name;mesh.position.copy(from.add(to).multiplyScalar(.5));mesh.quaternion.setFromUnitVectors(new T.Vector3(0,1,0),delta.normalize());mesh.castShadow=true;g.add(mesh);};
+  for(const x of [-.56,.56]){
+    const wheel=new T.Mesh(new T.TorusGeometry(.35,.038,6,16),tyre);wheel.name='Bicycle wheel';wheel.position.set(x,.38,0);wheel.castShadow=true;g.add(wheel);
+    const hub=new T.Mesh(new T.CylinderGeometry(.045,.045,.13,8),frame);hub.rotation.x=Math.PI/2;hub.position.set(x,.38,0);g.add(hub);
+    for(let i=0;i<8;i++){const a=i*Math.PI/4;rod('Wheel spoke',[x,.38,0],[x+Math.cos(a)*.32,.38+Math.sin(a)*.32,0],.006,spoke,4);}
+  }
+  const rear=[-.56,.38,0],front=[.56,.38,0],crank=[-.08,.43,0],seat=[-.2,.91,0],head=[.40,.96,0];
+  for(const [a,b] of [[rear,seat],[seat,crank],[crank,rear],[seat,head],[head,crank],[head,front]])rod('Bicycle frame',a,b,.021,frame);
+  rod('Seat post',[-.2,.86,0],[-.25,1.07,0],.026,frame);
+  rod('Seat',[-.39,1.07,0],[-.12,1.07,0],.055,trousers);
+  rod('Handle stem',head,[.45,1.13,0],.025,frame);
+  rod('Handlebar',[.45,1.13,-.30],[.45,1.13,.30],.025,trousers);
+  const hip=[-.20,1.13,0],shoulder=[.15,1.53,0];
+  rod('Cyclist torso',hip,shoulder,.14,jersey,8);
+  for(const side of [-1,1]){
+    rod('Cyclist arm',[.14,1.48,side*.12],[.43,1.15,side*.26],.045,skin);
+    rod('Cyclist thigh',[-.20,1.1,side*.09],[-.02, .75+(side>0?.08:-.08),side*.14],.065,trousers);
+    rod('Cyclist shin',[-.02,.75+(side>0?.08:-.08),side*.14],[-.05,.46+(side>0?.08:-.08),side*.14],.045,skin);
+  }
+  const face=new T.Mesh(new T.IcosahedronGeometry(.12,1),skin);face.position.set(.20,1.7,0);g.add(face);
+  const cap=new T.Mesh(new T.SphereGeometry(.128,8,4,0,Math.PI*2,0,Math.PI*.55),helmet);cap.position.set(.20,1.73,0);cap.castShadow=true;g.add(cap);
+  g.name='Cyclist';g.userData={...vehicleDimensions('cyclist'),source:'BridgeSketch low-poly geometry',units:'metres',forwardAxis:'+X'};
+  return g;
 }

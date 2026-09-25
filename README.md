@@ -1,6 +1,6 @@
 # BridgeSketch 3D
 
-**A quick visual tool for bridge concepts** · Version 0.4.3 · 24 September 2026 · Anthony Chéruel
+**A quick visual tool for bridge concepts** · Version 0.5.0 · 25 September 2026 · Anthony Chéruel
 
 BridgeSketch 3D is a browser-based, interactive 3D bridge configurator. Set a span arrangement, road section, superstructure, supports and site, then explore the result from above, below or along the obstacle being crossed. It runs entirely from local files served by the included offline launcher, or as a static site on GitHub Pages. There is no account, backend, build step or runtime internet dependency.
 
@@ -18,6 +18,7 @@ Select a concept at the top of the parameter panel. Every concept is editable; c
 | Low park bridge | Short, variable-depth solid concrete slab beside a river |
 | Urban boulevard | Four lanes, concrete median, sidewalks and square-column bents |
 | Weathered railway overpass | Skewed steel span with a weathered finish and return walls |
+| Cycle footbridge | A 4.2 m single-box bridge with moving cyclists, dynamic clouds and reflective river |
 
 All curated concepts open with return walls. Wingwalls remain an editable option under **Supports**, with a selectable flare angle.
 
@@ -32,12 +33,12 @@ All curated concepts open with return walls. Wingwalls remain an editable option
 ## Shape the bridge
 
 - **Model:** 1–8 spans, straight or curved alignment, skew, elevation, crest or constant grade. Each span can cross a road, railway or river.
-- **Deck:** total width, 0–8 lanes (0 gives a pedestrian-only concrete surface), editable lane width, shoulders, median or island, and optional sidewalks. Choose concrete, 210A, 210C or 20C railing independently on each bridge side. Sidewalks can have an additional traffic-side steel or concrete barrier.
+- **Deck:** total width, 0–8 lanes (0 gives a pedestrian-only concrete surface), editable lane width, shoulders, median or island, and optional sidewalks. Switch bridge traffic between cars/trucks and cyclists. Cycle bridges support 3–6 m deck widths and one 1.5–2 m cycle lane. Choose concrete, 210A, 210C or 20C railing independently on each bridge side. Sidewalks can have an additional traffic-side steel or concrete barrier.
 - **Structure:** metric NEBT concrete girders, steel plate girders, 1–14 hollow steel boxes with two 500 × 50 mm top flanges and inclined webs, or a solid concrete slab. Variable-depth steel and concrete girders and slabs can deepen at piers or, on a single span, at the abutments. A 400 mm constant-depth zone remains over the bearings. Painted steel includes the requested AMS-STD-595 brown, green, gray, three blues and red, plus weathered steel and custom hex input.
 - **Supports:** column bents with round or square columns, editable bent cap width and centre/end depths, pier walls, hammerheads, profile-following backwalls and return walls, and adjustable wingwalls. Major concrete edges have 15 mm chamfers.
-- **Site:** rural meadow or urban surroundings, grass or snow terrain, obstacle dimensions and clearance, 2H:1V approach embankments with optional stone-faced quarter cones and optional grass, stone or concrete slopes in front of the abutments. The approach reaches the model cut and its end is closed. Four locally bundled Kenney building types populate urban scenes.
+- **Site:** rural meadow or urban surroundings, grass or snow terrain, optional procedural cloud sky and reflective river surface, obstacle dimensions and clearance, 2H:1V approach embankments with optional stone-faced quarter cones and optional grass, stone or concrete slopes in front of the abutments. The approach reaches the model cut and its end is closed. Four locally bundled Kenney building types populate urban scenes.
 
-The scene bundles CC0 [Poly Haven rough concrete](https://polyhaven.com/a/rough_concrete) and [rock ground](https://polyhaven.com/a/rock_ground) colour, normal and roughness maps, plus textured asphalt and meadow surfaces, river motion, HSS railings, roadside W-beam guardrails, skew-following steel bracing and seven [Kenney Car Kit](https://kenney.nl/assets/car-kit) vehicle styles. Three [Kenney Train Kit](https://kenney.nl/assets/train-kit) consists—diesel freight, bullet and city passenger—can be selected for railway crossings or mixed between crossings. Each railway crossing has one seeded 4–12-car train using the right-hand track for its direction of travel. Traffic visibility and motion sit beside **Reveal structure** at the lower left of the viewer.
+The scene bundles CC0 [Poly Haven rough concrete](https://polyhaven.com/a/rough_concrete) and [rock ground](https://polyhaven.com/a/rock_ground) colour, normal and roughness maps, plus textured asphalt and meadow surfaces, river motion, HSS railings, roadside W-beam guardrails, skew-following steel bracing and seven [Kenney Car Kit](https://kenney.nl/assets/car-kit) vehicle styles. Cyclists use small BridgeSketch low-poly bicycle and rider meshes to match those vehicles without a runtime asset download. Three [Kenney Train Kit](https://kenney.nl/assets/train-kit) consists—diesel freight, bullet and city passenger—can be selected for railway crossings or mixed between crossings. Each railway crossing has one seeded 4–12-car train using the right-hand track for its direction of travel. Traffic visibility and motion sit beside **Reveal structure** at the lower left of the viewer.
 
 ## Explore and export
 

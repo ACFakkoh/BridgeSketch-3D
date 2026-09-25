@@ -4,9 +4,10 @@ import {defaults,validate,totalLength,spacing,clearance,setClearance,encodeConfi
 import {release} from './release.mjs';
 import {presets,makePreset} from './presets.mjs';
 import {makeMaterials,buildBridge,disposeModel,obstacleTour,animateTraffic,nebtSection,steelSection,boxSection} from './scene.mjs';
+import {makeSky} from './sky.mjs';
 
 const $=id=>document.getElementById(id),form=$('parameters');
-let config=makePreset(presets[0].id),model,renderer,camera,perspectiveCamera,orthoCamera,controls,scene,materials,view='perspective',pendingCamera;
+let config=makePreset(presets[0].id),model,renderer,camera,perspectiveCamera,orthoCamera,controls,scene,materials,sky,skyTime=0,view='perspective',pendingCamera;
 let messageTimer,driving=null;
 let needsRender=true,flowTime=0,lastTime=0,frameMs=0;
 function notify(message,error=false){clearTimeout(messageTimer);$('feedback').replaceChildren(document.createTextNode(message));$('feedback').classList.toggle('error',error);$('feedback').hidden=false;if(!error)messageTimer=setTimeout(()=>$('feedback').hidden=true,5000);}
@@ -58,6 +59,7 @@ function syncEnabled(){
   form.elements.steelColor.value=Object.hasOwn(steelFinishes,config.steelColor)?config.steelColor:'custom';
   $('steelPicker').value=paint;$('steelHex').value=paint.toUpperCase();$('steel-swatch').style.background=paint;
   form.elements.columns.disabled=config.pierType!=='bent';$('bent-settings').hidden=config.pierType!=='bent';form.elements.movingTraffic.disabled=!config.showTraffic;
+  form.elements.width.min=config.trafficMode==='cyclists'?'3':'4';form.elements.laneWidth.min=config.trafficMode==='cyclists'?'1.5':'2.5';form.elements.overhang.min=config.trafficMode==='cyclists'?'.3':'.65';
   $('columns-label').hidden=config.pierType!=='bent';$('column-diameter-label').hidden=config.pierType!=='bent';$('wall-settings').hidden=config.pierType!=='wall';$('hammerhead-settings').hidden=config.pierType!=='hammerhead';
   $('continuity-note').textContent=slab?(config.continuous?'Continuous solid slab across supports.':'Solid slab spans with joints at supports.'):!config.continuous?'Separate girder spans with joints at piers.':steel?'Unbroken girders and one bearing line at each pier.':'Precast spans joined with concrete closure diaphragms.';
   form.elements.material.options[0].disabled=config.curved;form.elements.radius.disabled=!config.curved;form.elements.direction.disabled=!config.curved;
@@ -86,6 +88,8 @@ function applyTimeOfDay(hour){
   hemi.intensity=.65+1.75*daylight-1.1*golden;
   fill.color.copy(tint('#7293bf','#c8ddfa','#ffcfab'));fill.intensity=.3+.95*daylight-.4*golden;
   rim.intensity=.15+.55*daylight+.15*golden;
+  sky?.update(daylight,golden,sun);
+  if(materials?.water){materials.water.color.copy(tint(config.waterStyle==='glossy'?'#183b5b':'#485b6b',config.waterStyle==='glossy'?'#4789a4':'#d8eeec',config.waterStyle==='glossy'?'#367390':'#c6dbdc'));materials.water.userData.sunGlow.value=golden;}
   scene.environmentIntensity=.25+.75*daylight-.1*golden;
   renderer.toneMappingExposure=.9+.28*daylight-.13*golden;
   $('viewport').style.setProperty('--night-factor',`${((1-daylight)*100).toFixed(1)}%`);
@@ -135,6 +139,8 @@ function update(raw,{resetCamera=false,refresh=false}={}){
   stopDriving();
   const next=validate(raw),started=performance.now(),replacement=buildBridge(next,materials);
   if(model){scene.remove(model.root);disposeModel(model);}config=next;model=replacement;scene.add(model.root);model.deck.visible=!$('reveal').checked;model.haunches.visible=!$('reveal').checked;model.setting.visible=view!=='elevation';
+  sky.mesh.visible=config.skyMode==='clouds'&&config.background!=='white';materials.water.roughness=config.waterStyle==='glossy'?.12:.28;materials.water.metalness=config.waterStyle==='glossy'?.12:.04;materials.water.envMapIntensity=config.waterStyle==='glossy'?1.6:1;materials.water.normalScale.setScalar(config.waterStyle==='glossy'?.4:.27);
+  const waterMap=config.waterStyle==='glossy'?null:materials.water.userData.baseMap;if(materials.water.map!==waterMap){materials.water.map=waterMap;materials.water.needsUpdate=true;}
   document.body.classList.toggle('background-white',config.background==='white');
   applyTimeOfDay(config.timeOfDay);
   if(refresh)refreshForm();else {syncEnabled();syncWaterFields();}
@@ -142,8 +148,8 @@ function update(raw,{resetCamera=false,refresh=false}={}){
   const L=totalLength(config);$('length').innerHTML=`${L.toFixed(1)} <small>m</small>`;$('area').innerHTML=`${Math.round(L*config.width).toLocaleString()} <small>m²</small>`;$('spacing').textContent=`${config.material==='slab'?'Not applicable':spacing(config).toFixed(2)+' m'}`;
   $('clearance').innerHTML=`${Math.min(...config.spans.map((_,i)=>clearance(config,i))).toFixed(2)} <small>m</small>`;
   let triangles=0;model.root.traverse(o=>{if(o.isMesh)triangles+=(o.geometry.index?.count??o.geometry.attributes.position.count)/3*(o.isInstancedMesh?o.count:1);});$('triangles').innerHTML=`${(triangles/1000).toFixed(1)}<small>k tris</small>`;
-  $('sceneTitle').textContent=config.curved?'Curved viaduct':config.spans.every(s=>s.obstacle==='water')?'River crossing':'Bridge crossing';
-  $('sceneSubtitle').textContent=`${config.spans.length} ${config.spans.length===1?'span':'spans'} · ${config.material==='slab'?'Solid concrete slab':config.material==='concrete'?'NEBT '+config.depth*1000:config.material==='box'?'Steel box girders':'Steel plate girders'} · ${config.environment}`;
+  $('sceneTitle').textContent=config.trafficMode==='cyclists'?'Cycle footbridge':config.curved?'Curved viaduct':config.spans.every(s=>s.obstacle==='water')?'River crossing':'Bridge crossing';
+  $('sceneSubtitle').textContent=`${config.spans.length} ${config.spans.length===1?'span':'spans'} · ${config.material==='slab'?'Solid concrete slab':config.material==='concrete'?'NEBT '+config.depth*1000:config.material==='box'?'Steel box girders':'Steel plate girders'} · ${config.trafficMode==='cyclists'?'cycling · ':''}${config.environment}`;
   if(resetCamera)fit(view);
   needsRender=true;const updateMs=performance.now()-started;
   $('preset').value='custom';
@@ -221,6 +227,7 @@ async function boot(){
   const skyMaterial=new T.MeshBasicMaterial({vertexColors:true,side:T.BackSide});skyScene.add(new T.Mesh(skyGeometry,skyMaterial));
   const pmrem=new T.PMREMGenerator(renderer);scene.environment=pmrem.fromScene(skyScene,.04).texture;scene.environmentIntensity=.7;
   pmrem.dispose();skyGeometry.dispose();skyMaterial.dispose();
+  sky=makeSky();scene.add(sky.mesh);
   const sun=new T.DirectionalLight(0xfff5e5,3.0);sun.position.set(-45,65,40);sun.castShadow=true;sun.shadow.mapSize.set(4096,4096);sun.shadow.camera.left=-160;sun.shadow.camera.right=160;sun.shadow.camera.top=110;sun.shadow.camera.bottom=-110;sun.shadow.camera.far=250;sun.shadow.normalBias=.04;sun.shadow.bias=-.00015;scene.add(sun);
   const fill=new T.DirectionalLight(0xd4eaff,1.15);fill.position.set(50,35,-45);scene.add(fill);
   const rim=new T.DirectionalLight(0xffe9cb,.7);rim.position.set(55,25,50);scene.add(rim);
@@ -240,7 +247,7 @@ async function boot(){
   $('tour').onchange=()=>{stopDriving();if($('tour').checked&&view!=='perspective')fit('perspective');controls.autoRotate=$('tour').checked;controls.autoRotateSpeed=.6;needsRender=true;};
   controls.autoRotate=$('tour').checked&&view==='perspective';controls.autoRotateSpeed=.6;$('tour').checked=controls.autoRotate;
   $('drive').onclick=startDriving;window.addEventListener('keydown',e=>{if(e.key==='Escape')stopDriving();});
-  renderer.setAnimationLoop(time=>{const dt=Math.min(.05,(time-lastTime)/1000);lastTime=time;if(document.hidden)return;if(driving)driveFrame(dt);else controls.update(dt);const moving=config.movingTraffic&&config.showTraffic;if(moving)animateTraffic(model,dt);const flowing=model.waters.length>0;if(flowing){flowTime+=dt;materials.water.userData.flowTime.value=flowTime;if(materials.water.map)materials.water.map.offset.x=-flowTime*.015;if(materials.water.normalMap)materials.water.normalMap.offset.x=-flowTime*.023;}if(needsRender||flowing||moving||controls.autoRotate){const start=performance.now();renderer.render(scene,camera);frameMs=performance.now()-start;needsRender=false;}});
+  renderer.setAnimationLoop(time=>{const dt=Math.min(.05,(time-lastTime)/1000);lastTime=time;if(document.hidden)return;if(driving)driveFrame(dt);else controls.update(dt);const moving=config.movingTraffic&&config.showTraffic;if(moving)animateTraffic(model,dt);const flowing=model.waters.length>0;if(flowing){flowTime+=dt;materials.water.userData.flowTime.value=flowTime;if(materials.water.map)materials.water.map.offset.x=-flowTime*.015;if(materials.water.normalMap)materials.water.normalMap.offset.x=-flowTime*.023;}const cloudy=sky.mesh.visible;if(cloudy){skyTime+=dt;sky.animate(skyTime,camera);}if(needsRender||flowing||moving||controls.autoRotate||cloudy){const start=performance.now();renderer.render(scene,camera);frameMs=performance.now()-start;needsRender=false;}});
   registerTools();
 }
 form.addEventListener('submit',e=>e.preventDefault());
@@ -252,6 +259,11 @@ form.addEventListener('change',e=>{
     const count=Number(e.target.value);if(!Number.isInteger(count)||count<1||count>8)throw Error('Use 1 to 8 spans.');
     const raw=readForm();raw.spans=Array.from({length:count},(_,i)=>raw.spans[i]??{...raw.spans.at(-1)});update(raw,{refresh:true,resetCamera:true});
   }else{const raw=readForm();if(raw.curved&&raw.material==='concrete')raw.material='steel';
+    if(e.target.name==='trafficMode'){
+      if(raw.trafficMode==='cyclists'){raw.laneCount=1;raw.laneWidth=1.8;raw.medianType='none';raw.sidewalkSide='none';raw.sidewalkRailing='none';}
+      else{raw.width=Math.max(raw.width,8);raw.laneCount=Math.max(2,raw.laneCount);raw.laneWidth=3.5;raw.overhang=Math.max(.65,raw.overhang);}
+    }
+    if(e.target.name==='width'&&raw.trafficMode==='cyclists'&&raw.width<=6&&raw.material!=='box')raw.overhang=Math.min(raw.overhang,Math.max(.3,(raw.width-1.95)/2));
     if(e.target.id==='steelPicker')raw.steelColor=$('steelPicker').value;
     if(e.target.id==='steelHex')raw.steelColor=$('steelHex').value.trim();
     if(e.target.name==='steelColor'&&raw.steelColor==='custom')raw.steelColor=$('steelPicker').value;
@@ -262,9 +274,10 @@ form.addEventListener('change',e=>{
     if(e.target.id==='boxCount')raw.girders=Number(e.target.value);
     if(e.target.name==='bentThickness'&&config.bentEndThickness===config.bentThickness)raw.bentEndThickness=raw.bentThickness;
     if(e.target.name==='material'&&raw.material==='box')raw.girders=raw.width<7?1:2;
-    if(raw.material==='box'&&(e.target.id==='boxCount'||['material','width','variableDepth','depth','pierDepth'].includes(e.target.name)))Object.assign(raw,fitBoxLayout(raw));
+    if(e.target.name==='material'&&raw.material==='steel'&&raw.trafficMode==='cyclists'&&raw.width<=6){raw.girders=2;raw.overhang=Math.min(raw.overhang,.45);}
+    if(raw.material==='box'&&(e.target.id==='boxCount'||['material','width','trafficMode','variableDepth','depth','pierDepth'].includes(e.target.name)))Object.assign(raw,fitBoxLayout(raw));
     if(e.target.name==='material'&&raw.material==='concrete'){raw.depth=depths.reduce((a,b)=>Math.abs(b-config.depth)<Math.abs(a-config.depth)?b:a);$('nebt').value=raw.depth;}
-    update(raw);form.elements.material.value=config.material;form.elements.overhang.value=config.overhang;form.elements.boxBottomWidth.value=config.boxBottomWidth;}
+    update(raw,{refresh:true});}
   $('feedback').hidden=true;
  }catch(error){refreshForm();notify(`${error.message} The last valid model remains visible.`,true);}
 });

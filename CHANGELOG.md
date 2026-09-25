@@ -1,5 +1,13 @@
 # BridgeSketch 3D
 
+## 0.5.0 — 2026-09-25 — Anthony Chéruel
+
+- Added a cycle-traffic mode with moving low-poly cyclists and a one-span cycle-footbridge preset.
+- 3–6 m cycle decks accept one narrow lane, two to four steel plate girders, or one steel box; the 3 m and 6 m extremes are covered by geometry checks.
+- Added optional procedural cloud sky and reflective river finish. Clouds follow the time-of-day lighting and drift during animation; both options work offline with no additional runtime packages.
+- Tuned sunset gradients and river glints after browser visual checks. Kept the existing instanced meadow and foliage textures after comparing proposed grass, water and cloud packages against the scene budget.
+- Recorded library, performance and licensing decisions in `TASKS.md`; GitHub publication follows local checks and the Notion R&D report.
+
 ## 0.4.3 — 2026-09-24 — Anthony Chéruel
 
 - Concrete haunches now match their 500 mm steel top flanges, including both moving flanges of variable-depth box girders.

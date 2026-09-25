@@ -69,19 +69,19 @@ float steelHash(vec3 p){return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.54
 float steelNoise(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(mix(steelHash(i),steelHash(i+vec3(1,0,0)),f.x),mix(steelHash(i+vec3(0,1,0)),steelHash(i+vec3(1,1,0)),f.x),f.y),mix(mix(steelHash(i+vec3(0,0,1)),steelHash(i+vec3(1,0,1)),f.x),mix(steelHash(i+vec3(0,1,1)),steelHash(i+vec3(1,1,1)),f.x),f.y),f.z);}`)
       .replace('#include <color_fragment>','#include <color_fragment>\nfloat patina=steelNoise(steelPosition*vec3(2.,.42,2.));float rustGrain=steelNoise(steelPosition*35.);vec3 weathering=mix(vec3(.55,.40,.31),vec3(1.13,.94,.68),patina)*(.91+.18*rustGrain);diffuseColor.rgb*=mix(vec3(1.),weathering,weathered);');
   };
-  m.water=material('#d8eeec',.28,.04);m.water.userData.flowTime={value:0};m.foam=new T.LineBasicMaterial({color:'#d8f1df',transparent:true,opacity:.16});
+  m.water=material('#d8eeec',.28,.04);m.water.userData.flowTime={value:0};m.water.userData.sunGlow={value:0};m.foam=new T.LineBasicMaterial({color:'#d8f1df',transparent:true,opacity:.16});
   if(typeof document!=='undefined'){
     const loader=new T.TextureLoader();
-    m.water.map=loader.load('./textures/river-water.webp',onLoad);m.water.map.colorSpace=T.SRGBColorSpace;m.water.map.wrapS=m.water.map.wrapT=T.RepeatWrapping;m.water.map.repeat.set(.09,.18);m.water.map.anisotropy=8;
+    m.water.map=loader.load('./textures/river-water.webp',onLoad);m.water.userData.baseMap=m.water.map;m.water.map.colorSpace=T.SRGBColorSpace;m.water.map.wrapS=m.water.map.wrapT=T.RepeatWrapping;m.water.map.repeat.set(.09,.18);m.water.map.anisotropy=8;
     m.water.normalMap=loader.load('./textures/river-normal.webp',onLoad);m.water.normalMap.wrapS=m.water.normalMap.wrapT=T.RepeatWrapping;m.water.normalMap.repeat.set(.13,.25);m.water.normalScale.set(.27,.27);
   }
   m.water.onBeforeCompile=shader=>{
-    shader.uniforms.flowTime=m.water.userData.flowTime;
+    shader.uniforms.flowTime=m.water.userData.flowTime;shader.uniforms.sunGlow=m.water.userData.sunGlow;
     shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec2 riverPosition;').replace('#include <begin_vertex>','#include <begin_vertex>\nriverPosition=uv;');
     shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
-uniform float flowTime; varying vec2 riverPosition;
+uniform float flowTime,sunGlow; varying vec2 riverPosition;
 float riverHash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
-float riverNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(riverHash(i),riverHash(i+vec2(1,0)),f.x),mix(riverHash(i+vec2(0,1)),riverHash(i+vec2(1,1)),f.x),f.y);}`).replace('#include <color_fragment>',`#include <color_fragment>\nvec2 q=vec2(riverPosition.x-flowTime*.85,riverPosition.y);float streak=riverNoise(q*vec2(.35,2.8)+vec2(0.,sin(q.x*.09)*1.2));float glint=smoothstep(.72,.95,streak);diffuseColor.rgb*=.85+.22*riverNoise(q*.08);diffuseColor.rgb+=vec3(.018,.025,.022)*glint;`).replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>\nvec2 p=vec2(riverPosition.x-flowTime*.85,riverPosition.y);vec3 rippleNormal=vec3(riverNoise(p*vec2(.4,2.3))-.5,0.0,riverNoise(p*vec2(.3,3.1)+7.)-.5);normal=normalize(normal+mat3(viewMatrix)*rippleNormal*.065);`);
+float riverNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(riverHash(i),riverHash(i+vec2(1,0)),f.x),mix(riverHash(i+vec2(0,1)),riverHash(i+vec2(1,1)),f.x),f.y);}`).replace('#include <color_fragment>',`#include <color_fragment>\nvec2 q=vec2(riverPosition.x-flowTime*.85,riverPosition.y);float streak=riverNoise(q*vec2(.35,2.8)+vec2(0.,sin(q.x*.09)*1.2));float glint=smoothstep(.86,.98,streak);diffuseColor.rgb*=.88+.16*riverNoise(q*.08);diffuseColor.rgb+=vec3(.006,.009,.009)*glint+sunGlow*vec3(.012,.005,.002)*glint;`).replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>\nvec2 p=vec2(riverPosition.x-flowTime*.85,riverPosition.y);vec3 rippleNormal=vec3(riverNoise(p*vec2(.4,2.3))-.5,0.0,riverNoise(p*vec2(.3,3.1)+7.)-.5);normal=normalize(normal+mat3(viewMatrix)*rippleNormal*.065);`);
   };
   return m;
 }
@@ -207,9 +207,9 @@ export function vehicle(parent,m,c,s,u,type,forward=true,road){
   if(type==='car')type='sedan';
   let dimensions=vehicleDimensions(type);
   const fits=d=>road?Math.abs(u)+d.halfWidth<=road.width/2-.2:vehicleFits(c,s,u,d.halfLength,d.halfWidth);
-  if(!fits(dimensions)){type='sedan';dimensions=vehicleDimensions(type);if(!fits(dimensions))return;}
+  if(!fits(dimensions)){type=c.trafficMode==='cyclists'&&!road?'cyclist':'sedan';dimensions=vehicleDimensions(type);if(!fits(dimensions))return;}
   const group=createVehicleModel(type,m['paint'+(Math.abs(Math.floor(s*3+u*7+c.seed))%7)],m);
-  const route={s,u,type,forward,road:road??null,halfLength:dimensions.halfLength,halfWidth:dimensions.halfWidth};
+  const route={s,u,type,forward,road:road??null,halfLength:dimensions.halfLength,halfWidth:dimensions.halfWidth,speed:type==='cyclist'?17:30};
   group.userData.route=route;positionVehicle(group,c);
   parent.userData.vehicles??=[];parent.userData.vehicles.push({...route,road:!!road});
   let traffic=parent.children.find(o=>o.name==='Traffic');if(!traffic){traffic=new T.Group();traffic.name='Traffic';parent.add(traffic);}
@@ -353,7 +353,7 @@ export function buildBridge(c,m,{batch=true}={}) {
       }else beam(structure,m.concrete,supportPoint(c,s,u,top-c.depth*.4),supportPoint(c,s,u+gspace,top-c.depth*.4),.25,c.depth*.52);
     }
     if(c.showTraffic)layout.laneCenters.forEach((u,lane)=>{
-      const type=vehicleKinds[(i*c.laneCount+lane+c.seed)%vehicleKinds.length],s=a+(b-a)*(lane%2?.65:.35);
+      const type=c.trafficMode==='cyclists'?'cyclist':vehicleKinds[(i*c.laneCount+lane+c.seed)%vehicleKinds.length],s=a+(b-a)*(lane%2?.65:.35);
       vehicle(deck,m,c,s,u,type,laneForward(c,lane));
     });
   });
