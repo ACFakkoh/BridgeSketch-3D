@@ -1,5 +1,16 @@
 # BridgeSketch 3D
 
+## 0.5.5 — 2026-09-27 — Anthony Chéruel
+
+Directives « Bridge Sketch 3D directives 2026-09-27 V2 suite »:
+
+- Fixes: smaller trees (5–10.5 m), no open strip in the approach pavement next to a sidewalk protected by a Type 301 barrier on the bridge (the protection continues only with continued railings), street lights hidden with **Reveal structure**, author name on the launch sequence.
+- Street lights: 12 m tapered poles with a transformer base and a single upswept davit arm reaching 3.0 m, curved lower brace and struts, flat LED head; instanced (three draw calls for all poles).
+- Barriers: MTQ Type 311 (880 mm, 460 mm base, 275 mm top) and Type 311 A+B with a 200 × 150 mm steel rail 400 mm above the concrete on posts at 2.4 m, in 3D and in the section.
+- Structural systems: prestressed concrete box girder; rigid frame (portique) with monolithic supports; strutted frame with inclined legs (béquilles); concrete or steel deck arch with spandrel columns; tied arch with leaning ribs, hangers and wind bracing. Five new concepts: Box girder viaduct, Strutted frame, Concrete deck arch, Steel tied arch, Rigid frame.
+- Site: autumn season (tree colours, straw meadow, fallen leaves) and falling-leaves weather; terrain that follows the road profile with 2H:1V valley slopes parallel to the abutments and crossings; moving cloud shadows; water marks on piers in the river.
+- Performance: Balanced by default; new Auto quality (GPU guess, then steps down under 24 fps); tree levels of detail (far kit ≈ 450 triangles per tree), distance-thinned meadow in culled 32 m tiles, sun shadows redrawn only when needed, ambient animation capped at 30 fps, reflection refreshed every other frame when the camera is still, lower pixel-ratio caps; shaders compiled before the first frame and a compositor-only launch drawing; Stats overlay with fps, CPU and GPU time (timer query), draw calls and triangles. WebGPU lab page (`lab/webgpu-meadow.html`) with meadow and rain in TSL compute shaders.
+
 ## Non publié — correctifs du 2026-09-27 — Anthony Chéruel
 
 - Defaults for every preset: dynamic clouds, calm mirror river, High quality, atmospheric haze (optional, tinted by the hour).

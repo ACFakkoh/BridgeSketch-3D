@@ -200,6 +200,8 @@
                 >Left side<select name="leftRailing">
                   <option value="201">Concrete barrier · Type 201 · 880 mm</option>
                   <option value="301">Concrete barrier · Type 301 · 1140 mm</option>
+                  <option value="311">Concrete barrier · Type 311 · 880 mm</option>
+                  <option value="311A">Type 311 A+B · concrete + steel rail · 1280 mm</option>
                   <option value="210A">Steel HSS 210A · 870 mm</option>
                   <option value="210C">Steel HSS 210C · 1400 mm</option>
                   <option value="20C">Steel 20C · 1400 mm pickets</option>
@@ -208,6 +210,8 @@
                 >Right side<select name="rightRailing">
                   <option value="201">Concrete barrier · Type 201 · 880 mm</option>
                   <option value="301">Concrete barrier · Type 301 · 1140 mm</option>
+                  <option value="311">Concrete barrier · Type 311 · 880 mm</option>
+                  <option value="311A">Type 311 A+B · concrete + steel rail · 1280 mm</option>
                   <option value="210A">Steel HSS 210A · 870 mm</option>
                   <option value="210C">Steel HSS 210C · 1400 mm</option>
                   <option value="20C">Steel 20C · 1400 mm pickets</option>
@@ -266,11 +270,39 @@
             <div class="panel-column">
               <h3 class="section-label">Superstructure</h3>
               <label
+                >Structural system<select name="structureSystem">
+                  <option value="girder">Girder bridge · on bearings</option>
+                  <option value="frame">Rigid frame · portique, no bearings</option>
+                  <option value="strutted">Strutted frame · inclined legs (béquilles)</option>
+                  <option value="arch">Arch · deck arch or tied arch</option>
+                </select></label
+              >
+              <div id="arch-fields" class="field-grid">
+                <label
+                  >Arch type<select name="archType">
+                    <option value="deck">Deck arch · spandrel columns</option>
+                    <option value="tied">Tied arch · above the deck</option>
+                  </select></label
+                ><label
+                  >Arch material<select name="archMaterial">
+                    <option value="concrete">Concrete</option>
+                    <option value="steel">Steel</option>
+                  </select></label
+                ><label>Arch span<select name="archSpan" id="archSpan"></select></label
+                ><label title="Tied arch: rise over span (deck arch: from the springings to the deck)"
+                  >Tied arch rise / span<input name="archRise" type="number" min="0.1" max="0.35" step="0.01"
+                /></label>
+              </div>
+              <div id="strut-fields" class="field-grid">
+                <label>Leg angle from vertical · °<input name="strutAngle" type="number" min="15" max="45" step="1" /></label>
+              </div>
+              <label
                 >Structure type<select name="material">
                   <option value="concrete">Concrete · NEBT</option>
                   <option value="steel">Steel · plate girders</option>
                   <option value="box">Steel · box girders</option>
                   <option value="slab">Concrete · solid slab</option>
+                  <option value="psbox">Concrete · prestressed box girder</option>
                 </select></label
               >
               <p id="material-note" class="hint"></p>
@@ -501,6 +533,7 @@
                 </select></label
               ><label
                 >Render quality<select name="renderQuality">
+                  <option value="auto">Auto · from the GPU, lowered if the frame rate drops</option>
                   <option value="performance">Performance · no water reflection</option>
                   <option value="balanced">Balanced · half-resolution reflection</option>
                   <option value="high">High · dense meadow, sharp reflection</option>
@@ -510,12 +543,19 @@
                   <option value="clear">Clear</option>
                   <option value="rain">Light rain</option>
                   <option value="snow">Light snow</option>
+                  <option value="leaves">Falling leaves · light breeze</option>
                 </select></label
               ><label class="check"><input name="fog" type="checkbox" />Atmospheric haze · tinted by the hour</label
               ><label
                 >Terrain cover<select name="terrainMode">
-                  <option value="grass">Meadow grass</option>
+                  <option value="grass">Summer meadow</option>
+                  <option value="fall">Autumn · fall colours</option>
                   <option value="snow">Winter snow</option>
+                </select></label
+              ><label
+                >Terrain shape<select name="terrainShape">
+                  <option value="natural">Natural valley · approach embankments</option>
+                  <option value="profile">Follows the road profile · cut valley</option>
                 </select></label
               ><label
                 >Surroundings<select name="environment">
@@ -577,7 +617,8 @@
           ><label><input name="showTraffic" form="parameters" type="checkbox" />Show traffic</label
           ><label><input name="movingTraffic" form="parameters" type="checkbox" />Moving traffic</label
           ><label><input id="tour" type="checkbox" checked />Orbit</label
-          ><label><input id="dusk" type="checkbox" checked />Golden hour</label>
+          ><label><input id="dusk" type="checkbox" checked />Golden hour</label
+          ><label title="Frame rate, CPU and GPU time, draw calls and quality tier"><input id="stats" type="checkbox" />Stats</label>
         </div>
         <div class="export-tools">
           <button id="image">Snapshot</button><button id="export-glb">Export GLB</button
@@ -594,6 +635,7 @@
           </details>
         </div>
         <p id="drive-status" class="drive-status" role="status" hidden></p>
+        <p id="perf-hud" class="perf-hud" role="status" aria-live="off" hidden></p>
         <p class="navigation-hint">Drag to orbit · Right-drag to pan · Scroll to zoom</p>
         <div id="feedback" role="status" aria-live="polite" hidden></div>
         <div id="fatal" role="alert" hidden></div>
@@ -608,11 +650,13 @@
         <p>A quick visual tool for bridge concepts.</p>
         <p id="about-release"></p>
         <p>By Anthony Chéruel</p>
-        <h3>Version 0.5.0</h3>
+        <h3>Version 0.5.5</h3>
         <p>
-          Cycle footbridges with animated cyclists, spans up to 150 m and radii down to 30 m, steel stiffeners,
-          cross-frames and support diaphragms, constant 150 mm bearing plinths, named variants, riprap slopes and a
-          reflective river. Offline and GitHub Pages packages remain self-contained.
+          New structural systems: prestressed concrete box girders, rigid frames (portique), strutted frames with
+          inclined legs, concrete or steel deck arches and tied arches. MTQ Type 311 barrier and 311 A+B steel rail,
+          12 m street lights with a single davit arm, autumn scenery with falling leaves, moving cloud shadows, pier
+          water marks and a terrain that can follow the road profile. Faster rendering: Balanced by default, an Auto
+          quality, tree and grass levels of detail, on-demand shadows and a Stats overlay.
         </p>
         <p class="hint">
           Concept visualization only. This tool does not perform structural design or verify code compliance.

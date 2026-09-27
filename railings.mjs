@@ -2,7 +2,7 @@
 import * as T from 'three';
 import { frame, profile, supportStation } from './geometry.mjs';
 import { box, chamferSection, rect, sweep } from './sections.mjs';
-import { CURB_HEIGHT, wheelCurb } from './deck-profiles.mjs';
+import { CURB_HEIGHT, RAIL_311A, barrierHeight, barrierTopCentre, wheelCurb } from './deck-profiles.mjs';
 
 export const guardrailSection = [
   [-0.04, 0.53],
@@ -116,5 +116,32 @@ export function roadsideGuardrail(parent, m, c, a, b, u, road) {
   for (const mesh of [...group.children]) {
     mesh.applyMatrix4(group.matrix);
     parent.add(mesh);
+  }
+}
+
+// Type 311A (« 311 A+B »): a steel tube rail on short posts anchored in the top of a Type 311 concrete barrier.
+export function barrierRail(parent, m, c, a, b, edge, side, base) {
+  const r = RAIL_311A,
+    u = edge - side * barrierTopCentre('311A'),
+    top = base + barrierHeight('311A'),
+    railTop = top + r.rise,
+    t = 0.008;
+  for (const section of [
+    rect(u - r.width / 2, u + r.width / 2, railTop, railTop - t),
+    rect(u - r.width / 2, u + r.width / 2, railTop - r.depth + t, railTop - r.depth),
+    rect(u - r.width / 2, u - r.width / 2 + t, railTop - t, railTop - r.depth + t),
+    rect(u + r.width / 2 - t, u + r.width / 2, railTop - t, railTop - r.depth + t),
+  ])
+    parent.add(sweep(c, a, b, section, m.railing));
+  const count = Math.max(1, Math.round((b - a) / r.spacing));
+  for (let j = 0; j <= count; j++) {
+    const q = a + 0.3 + ((b - a - 0.6) * j) / count,
+      s = supportStation(c, q, u),
+      p = frame(c, s, u),
+      y = profile(c, s),
+      angle = -Math.atan2(p.tz, p.tx),
+      postHeight = r.rise - r.depth;
+    box(parent, m.railing, p.x, y + top + postHeight / 2, p.z, r.post, postHeight, 0.1, angle);
+    box(parent, m.dark, p.x, y + top + 0.012, p.z, 0.3, 0.025, 0.24, angle);
   }
 }

@@ -4,6 +4,48 @@ import { makeWaterMaterial } from './water.mjs';
 import { prepareGrassMaterial } from './grass.mjs';
 import { prepareLeafMaterial } from './trees.mjs';
 
+// Moving cloud shadows (0.5.5): the sun's shadow term of every lit material is multiplied by a drifting
+// cloud-cover noise sampled at the world position. One global shader patch, no extra render pass; the
+// uniforms are shared through onBeforeCompile (materials without them get strength 0: no clouds).
+export const cloudShadow = { time: { value: 0 }, strength: { value: 0 } };
+if (!T.ShaderChunk.shadowmap_vertex.includes('vCloudWorld')) {
+  T.ShaderChunk.shadowmap_pars_vertex += '\n#ifdef USE_SHADOWMAP\nvarying vec3 vCloudWorld;\n#endif\n';
+  T.ShaderChunk.shadowmap_vertex += '\n#ifdef USE_SHADOWMAP\nvCloudWorld=worldPosition.xyz;\n#endif\n';
+  T.ShaderChunk.shadowmap_pars_fragment += `
+#ifdef USE_SHADOWMAP
+varying vec3 vCloudWorld;uniform float cloudTime,cloudStrength;
+float cloudHash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float cloudNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(cloudHash(i),cloudHash(i+vec2(1,0)),f.x),mix(cloudHash(i+vec2(0,1)),cloudHash(i+vec2(1,1)),f.x),f.y);}
+float cloudShade(){
+  if(cloudStrength<=0.)return 1.;
+  vec2 p=vCloudWorld.xz*.012+vec2(cloudTime*.021,cloudTime*.009);
+  float n=cloudNoise(p)*.55+cloudNoise(p*2.3+7.1)*.3+cloudNoise(p*5.1+3.7)*.15;
+  return 1.-cloudStrength*smoothstep(.5,.72,n);
+}
+#endif
+`;
+  const line = 'vDirectionalShadowCoord[ i ] ) : 1.0;';
+  if (T.ShaderChunk.lights_fragment_begin.includes(line))
+    T.ShaderChunk.lights_fragment_begin = T.ShaderChunk.lights_fragment_begin.replace(
+      line,
+      line + '\n\t\tdirectLight.color *= cloudShade();',
+    );
+}
+const withClouds = material => {
+  if (material.userData.clouds) return material;
+  material.userData.clouds = true;
+  // Keep each material's own program key: the wrapper below has the same source text for every material.
+  const previous = material.onBeforeCompile,
+    key = material.customProgramCacheKey() + '|clouds';
+  material.customProgramCacheKey = () => key;
+  material.onBeforeCompile = (shader, renderer) => {
+    shader.uniforms.cloudTime = cloudShadow.time;
+    shader.uniforms.cloudStrength = cloudShadow.strength;
+    previous?.call(material, shader, renderer);
+  };
+  return material;
+};
+
 export function makeMaterials(onLoad = () => {}) {
   const material = (color, roughness = 0.85, metalness = 0) =>
     new T.MeshStandardMaterial({ color, roughness, metalness });
@@ -119,9 +161,11 @@ export function makeMaterials(onLoad = () => {}) {
   // Site tint: wetter, deeper green near the water line; drier straw on 2H:1V slopes; lawn for urban sites.
   m.grass.userData.waterLevel = { value: -1e4 };
   m.grass.userData.lawn = { value: 0 };
+  m.grass.userData.fall = { value: 0 };
   m.grass.onBeforeCompile = shader => {
     shader.uniforms.waterLevel = m.grass.userData.waterLevel;
     shader.uniforms.lawn = m.grass.userData.lawn;
+    shader.uniforms.fall = m.grass.userData.fall;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 meadowPosition;varying vec3 meadowNormal;')
       .replace(
@@ -132,7 +176,7 @@ export function makeMaterials(onLoad = () => {}) {
       .replace(
         '#include <common>',
         `#include <common>
-varying vec3 meadowPosition;varying vec3 meadowNormal;uniform float waterLevel,lawn;
+varying vec3 meadowPosition;varying vec3 meadowNormal;uniform float waterLevel,lawn,fall;
 float meadowHash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float meadowNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(meadowHash(i),meadowHash(i+vec2(1,0)),f.x),mix(meadowHash(i+vec2(0,1)),meadowHash(i+vec2(1,1)),f.x),f.y);}`,
       )
@@ -152,7 +196,14 @@ float meadowSlope=1.-clamp(abs(meadowNormal.y),0.,1.),dry=smoothstep(.035,.12,me
 diffuseColor.rgb*=mix(vec3(1.),vec3(1.1,1.04,.8),dry);
 float wet=smoothstep(waterLevel+1.8,waterLevel+.25,meadowPosition.y);
 diffuseColor.rgb*=mix(vec3(1.),vec3(.78,.9,.8),wet);
-diffuseColor.rgb*=mix(vec3(1.),vec3(1.04,1.12,.94),lawn);`,
+diffuseColor.rgb*=mix(vec3(1.),vec3(1.04,1.12,.94),lawn);
+// Autumn: straw-gold meadow with drifts of fallen leaves (orange, rust, ochre).
+if(fall>0.){
+  diffuseColor.rgb*=mix(vec3(1.),mix(vec3(1.1,.93,.62),vec3(1.,.8,.55),meadowPatch),fall);
+  float litter=smoothstep(.66,.84,meadowNoise(meadowPosition.xz*3.1))*smoothstep(.25,.65,meadowNoise(meadowPosition.xz*.19+3.));
+  vec3 leafCol=mix(vec3(.5,.16,.05),vec3(.74,.4,.08),meadowNoise(meadowPosition.xz*7.3));
+  diffuseColor.rgb=mix(diffuseColor.rgb,leafCol,fall*litter*.8);
+}`,
       );
   };
   // Diorama cut faces: one soil section on all four edges and the approach cuts. A 'soilDepth' attribute
@@ -170,9 +221,11 @@ diffuseColor.rgb*=mix(vec3(1.),vec3(1.04,1.12,.94),lawn);`,
   m.soil = material('#ffffff', 0.97);
   m.soil.customProgramCacheKey = () => 'bridgesketch-soil-060';
   m.soil.userData.snow = { value: 0 };
+  m.soil.userData.fall = { value: 0 };
   m.soil.userData.noBatch = true; // keeps its soilDepth attribute
   m.soil.onBeforeCompile = shader => {
     shader.uniforms.soilSnow = m.soil.userData.snow;
+    shader.uniforms.soilFall = m.soil.userData.fall;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float soilDepth;varying float vSoilDepth;varying vec3 vSoilWorld;')
       .replace(
@@ -183,7 +236,7 @@ diffuseColor.rgb*=mix(vec3(1.),vec3(1.04,1.12,.94),lawn);`,
       .replace(
         '#include <common>',
         `#include <common>
-varying float vSoilDepth;varying vec3 vSoilWorld;uniform float soilSnow;
+varying float vSoilDepth;varying vec3 vSoilWorld;uniform float soilSnow,soilFall;
 float soilHash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float soilNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(soilHash(i),soilHash(i+vec2(1,0)),f.x),mix(soilHash(i+vec2(0,1)),soilHash(i+vec2(1,1)),f.x),f.y);}`,
       )
@@ -200,7 +253,7 @@ float soilNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mi
   vec3 top=vec3(.24,.18,.12)*(.85+.3*soilNoise(vec2(along*2.,vSoilWorld.y*4.)));
   vec3 col=mix(top,sub,smoothstep(.28,.55,d));
   float fringe=1.-smoothstep(.04,.1+.06*soilNoise(vec2(along*3.,0.)),d);
-  col=mix(col,mix(vec3(.33,.45,.2),vec3(.86,.9,.92),soilSnow),fringe);
+  col=mix(col,mix(mix(vec3(.33,.45,.2),vec3(.55,.42,.18),soilFall),vec3(.86,.9,.92),soilSnow),fringe);
   diffuseColor.rgb=col;
 }`,
       );
@@ -276,13 +329,15 @@ float steelNoise(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(m
   m.bark = material('#b9ab98', 0.95);
   m.leaves = {};
   m.leavesSnow = {};
+  m.leavesFall = {};
   for (const [leaf, tint] of [
     ['oak', '#d5d5cd'],
     ['ash', '#ffffff'],
     ['aspen', '#dfe6b4'],
   ]) {
     m.leaves[leaf] = prepareLeafMaterial(material(tint, 0.82));
-    m.leavesSnow[leaf] = prepareLeafMaterial(material(tint, 0.82), true);
+    m.leavesSnow[leaf] = prepareLeafMaterial(material(tint, 0.82), 'snow');
+    m.leavesFall[leaf] = prepareLeafMaterial(material('#ffffff', 0.8), 'fall');
   }
   if (typeof document !== 'undefined') {
     const loader = new T.TextureLoader(),
@@ -298,7 +353,58 @@ float steelNoise(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(m
       t.wrapS = t.wrapT = T.RepeatWrapping;
       t.repeat.set(1, 0.1);
     }
-    for (const leaf of Object.keys(m.leaves)) m.leaves[leaf].map = m.leavesSnow[leaf].map = load(`leaf-${leaf}.webp`);
+    for (const leaf of Object.keys(m.leaves))
+      m.leaves[leaf].map = m.leavesSnow[leaf].map = m.leavesFall[leaf].map = load(`leaf-${leaf}.webp`);
   }
+  // Pier water marks: a darker wet band and faint algae just above the river level, only on concrete inside the
+  // river corridor (piers, not abutments far from the water). Set per scene by buildBridge.
+  m.concrete.userData.stain = {
+    level: { value: -1e4 },
+    centre: { value: new T.Vector2() },
+    along: { value: new T.Vector2(1, 0) },
+    half: { value: 0 },
+  };
+  {
+    const stain = m.concrete.userData.stain;
+    m.concrete.customProgramCacheKey = () => 'bridgesketch-concrete-055';
+    m.concrete.onBeforeCompile = shader => {
+      shader.uniforms.stainLevel = stain.level;
+      shader.uniforms.stainCentre = stain.centre;
+      shader.uniforms.stainAlong = stain.along;
+      shader.uniforms.stainHalf = stain.half;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 stainWorld;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nstainWorld=(modelMatrix*vec4(transformed,1.)).xyz;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+varying vec3 stainWorld;uniform float stainLevel,stainHalf;uniform vec2 stainCentre,stainAlong;
+float stainHash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float stainNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(stainHash(i),stainHash(i+vec2(1,0)),f.x),mix(stainHash(i+vec2(0,1)),stainHash(i+vec2(1,1)),f.x),f.y);}`,
+        )
+        .replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+if(stainLevel>-1e3){
+  vec2 rel=stainWorld.xz-stainCentre;
+  float inside=1.-smoothstep(stainHalf,stainHalf+5.,abs(dot(rel,vec2(-stainAlong.y,stainAlong.x))));
+  float h=stainWorld.y-stainLevel,ring=dot(stainWorld.xz,vec2(.71,.7));
+  float top=.35+.55*stainNoise(vec2(ring*2.7,1.3))+.3*stainNoise(vec2(ring*11.,4.));
+  float wet=smoothstep(-.6,-.05,h)*(1.-smoothstep(top-.25,top,h));
+  float streak=smoothstep(.55,.9,stainNoise(vec2(ring*14.,.5)))*(1.-smoothstep(0.,1.8,h))*step(0.,h);
+  float algae=(1.-smoothstep(.0,.3,h))*smoothstep(-.5,-.1,h);
+  vec3 c=diffuseColor.rgb;
+  c*=mix(1.,.66+.1*stainNoise(stainWorld.xz*4.+stainWorld.y),max(wet,streak*.6)*inside);
+  c=mix(c,c*vec3(.72,.86,.6),algae*inside*.8);
+  diffuseColor.rgb=c;
+}`,
+        );
+    };
+  }
+  // Every lit material receives the moving cloud shadow uniforms.
+  for (const value of Object.values(m))
+    if (value?.isMaterial) withClouds(value);
+    else if (value && typeof value === 'object') for (const v of Object.values(value)) if (v?.isMaterial) withClouds(v);
   return m;
 }

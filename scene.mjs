@@ -36,8 +36,10 @@ import {
   roadLayout,
   laneForward,
   steelFinishes,
+  monolithicSupport,
 } from './geometry.mjs';
-import { addEnvironment, approachSurfaces, frontSlopeFit } from './terrain.mjs';
+import { addArch, addPsbox, addStrutLeg } from './systems.mjs';
+import { addEnvironment, approachSurfaces, frontSlopeFit, terrainSampler } from './terrain.mjs';
 import {
   beam,
   box,
@@ -57,7 +59,7 @@ import {
   sweep,
   wallBetween,
 } from './sections.mjs';
-import { bridgeRailing, roadsideGuardrail } from './railings.mjs';
+import { barrierRail, bridgeRailing, roadsideGuardrail } from './railings.mjs';
 import { concreteBarrier, isConcrete, sidewalkProfile, sidewalkTop } from './deck-profiles.mjs';
 import { bracingMember, webOffset, webStiffener } from './steel-details.mjs';
 import { vehicle } from './traffic.mjs';
@@ -85,6 +87,7 @@ export function buildBridge(c, m, { batch = true } = {}) {
   const waterSpans = c.spans.filter(span => span.obstacle === 'water');
   m.grass.userData.waterLevel.value = waterSpans.length ? Math.min(...waterSpans.map(span => span.elevation)) : -1e4;
   m.grass.userData.lawn.value = c.environment === 'urban' ? 1 : 0;
+  m.grass.userData.fall.value = m.soil.userData.fall.value = c.terrainMode === 'fall' ? 1 : 0;
   const root = new T.Group(),
     deck = new T.Group(),
     structure = new T.Group(),
@@ -144,6 +147,7 @@ export function buildBridge(c, m, { batch = true } = {}) {
       return;
     }
     addSweep(deck, a, b, chamferSection(concreteBarrier(type, edge, side, raised ?? base)), m.edge);
+    if (type === '311A') barrierRail(deck, m, c, a, b, edge, side, raised ?? base);
   };
   // Sidewalks: 280 mm above the slab at the road-side face (35 mm in 280 mm batter), rising 1 % outwards.
   // Behind a Type 301 barrier the sidewalk face is the barrier's vertical back.
@@ -212,7 +216,7 @@ export function buildBridge(c, m, { batch = true } = {}) {
       }
     addMedian(a, b);
     addMarkings(a, b);
-    for (let g = 0; g < (c.material === 'slab' ? 0 : c.girders); g++) {
+    for (let g = 0; g < (c.material === 'slab' || c.material === 'psbox' ? 0 : c.girders); g++) {
       const u = -half + c.overhang + g * gspace;
       if (!(c.continuous && (c.material === 'steel' || c.material === 'box'))) {
         if (c.material === 'box') addBoxGirder(structure, a + 0.22, b - 0.22, u, g);
@@ -263,7 +267,7 @@ export function buildBridge(c, m, { batch = true } = {}) {
     }
     // Cross-frames at no more than 8 m in each span; supports get full diaphragms below.
     const frames = Math.max(1, Math.ceil((b - a) / 8));
-    for (let n = 1; n < frames && c.material !== 'slab'; n++) {
+    for (let n = 1; n < frames && c.material !== 'slab' && c.material !== 'psbox'; n++) {
       const s = a + ((b - a) * n) / frames;
       for (let g = 0; g < c.girders - 1; g++) {
         const u = -half + c.overhang + g * gspace,
@@ -349,6 +353,7 @@ export function buildBridge(c, m, { batch = true } = {}) {
         vehicle(deck, m, c, s, u, type, laneForward(c, lane));
       });
   });
+  if (c.material === 'psbox') addPsbox(c, m, structure);
   if (c.continuous && (c.material === 'steel' || c.material === 'box'))
     for (let g = 0; g < c.girders; g++) {
       const u = -half + c.overhang + g * gspace;
@@ -363,19 +368,23 @@ export function buildBridge(c, m, { batch = true } = {}) {
           (_, s, v, u) => girderTop(c, 0, s) + (v < -0.05 ? c.depth - girderDepth(c, s, u) : 0),
         );
     }
+  const earthLevel = Math.min(-0.3, ...c.spans.map(s => s.elevation - 1));
   ss.forEach((s, j) => {
-    const earth = Math.min(-0.3, ...c.spans.map(s => s.elevation - 1)),
-      interior = j > 0 && j < ss.length - 1;
+    const earth = earthLevel,
+      interior = j > 0 && j < ss.length - 1,
+      // Rigid frames and strutted-frame leg joints are monolithic: no bearings, the support meets the soffit.
+      mono = monolithicSupport(c, j),
+      integral = c.structureSystem === 'frame';
     const lines = interior
-      ? c.continuous && ['steel', 'box', 'slab'].includes(c.material)
+      ? c.continuous && ['steel', 'box', 'slab', 'psbox'].includes(c.material)
         ? [0]
         : [-0.55, 0.55]
       : [j === 0 ? 0.5 : -0.5];
     const spanOf = side => Math.max(0, Math.min(c.spans.length - 1, side < 0 ? j - 1 : j));
     // Every bearing: 75 mm pad on a constant 150 mm plinth. The support top follows
     // the plinth undersides across the deck and between bearing lines.
-    const padBottom = (u, side) => soffitAt(c, spanOf(side), supportStation(c, s, u) + side, u) - 0.075;
-    const seatLine = (u, side) => padBottom(u, side) - 0.15;
+    const padBottom = (u, side) => soffitAt(c, spanOf(side), supportStation(c, s, u) + side, u) - (mono ? 0 : 0.075);
+    const seatLine = (u, side) => padBottom(u, side) - (mono ? -0.05 : 0.15);
     const seatAt = (u, offset = 0) => {
       if (lines.length === 1) return seatLine(u, lines[0]);
       const a = seatLine(u, lines[0]),
@@ -456,7 +465,9 @@ export function buildBridge(c, m, { batch = true } = {}) {
           wallBetween(structure, m.concrete, p0, p1, 0.45, earth, Math.max(seatMin + 0.2, profile(c, s) - 0.17));
         }
       }
-    } else if (c.pierType === 'wall') {
+    } else if (c.structureSystem === 'strutted' && mono) {
+      addStrutLeg(c, m, structure, j, earth);
+    } else if (c.pierType === 'wall' || (integral && c.pierType === 'hammerhead')) {
       const wall = profiledSupportWall(
         structure,
         m.concrete,
@@ -474,23 +485,26 @@ export function buildBridge(c, m, { batch = true } = {}) {
         capHeight = c.hammerheadThickness,
         capWidth = bent ? c.bentWidth : c.hammerheadThickness;
       const capDepthAt = u => {
+        if (integral) return 0;
         if (!bent) return capHeight;
         const edge = (half - 0.15) * 0.65,
           t = Math.max(0, Math.min(1, (Math.abs(u) - edge) / (half - 0.15 - edge)));
         return c.bentThickness + (c.bentEndThickness - c.bentThickness) * t * t * (3 - 2 * t);
       };
-      const cap = profiledSupportWall(
-        structure,
-        m.concrete,
-        c,
-        s,
-        -half + 0.15,
-        half - 0.15,
-        capWidth,
-        (u, offset) => seatAt(u, offset) - capDepthAt(u),
-        (u, offset) => seatAt(u, offset),
-      );
-      cap.name = 'Pier cap';
+      if (!integral) {
+        const cap = profiledSupportWall(
+          structure,
+          m.concrete,
+          c,
+          s,
+          -half + 0.15,
+          half - 0.15,
+          capWidth,
+          (u, offset) => seatAt(u, offset) - capDepthAt(u),
+          (u, offset) => seatAt(u, offset),
+        );
+        cap.name = 'Pier cap';
+      }
       const us =
         c.pierType === 'hammerhead' || c.columns === 1
           ? [0]
@@ -550,7 +564,7 @@ export function buildBridge(c, m, { batch = true } = {}) {
         y + d / 2,
       );
     }
-    for (let g = 0; g < c.girders; g++)
+    for (let g = 0; g < (mono ? 0 : c.girders); g++)
       for (const side of lines) {
         const u = -half + c.overhang + g * gspace,
           sg = supportStation(c, s, u) + side,
@@ -572,7 +586,7 @@ export function buildBridge(c, m, { batch = true } = {}) {
         );
         plinth.name = 'Bearing plinth';
       }
-    if (c.material !== 'slab')
+    if (c.material !== 'slab' && c.material !== 'psbox')
       for (const side of lines) {
         const k = spanOf(side),
           line = s + side;
@@ -677,19 +691,33 @@ export function buildBridge(c, m, { batch = true } = {}) {
         }
       }
   });
+  if (c.structureSystem === 'arch') addArch(c, m, structure, earthLevel, terrainSampler(c));
   const sceneHalf = L / 2 + c.approach + 18;
   for (const [a, b] of fills.ranges) {
     const first = deck.children.length;
+    // The sidewalk protection continues on the approaches only with the bridge railings; otherwise the
+    // pavement runs up to the sidewalk face (no open strip where a Type 301 barrier stood on the deck).
+    const innerOnApproach = c.approachBarrier === 'extend' && c.sidewalkRailing !== 'none',
+      paveEdge = side => (innerOnApproach ? (side < 0 ? roadMin : roadMax) : sidewalkFace(side));
     addSweep(
       deck,
       a,
       b,
-      rect(leftSide ? roadMin : -half, rightSide ? roadMax : half, 0, -0.17),
+      rect(leftSide ? paveEdge(-1) : -half, rightSide ? paveEdge(1) : half, 0, -0.17),
       c.laneCount ? m.asphalt : m.concrete,
     );
     addSidewalks(a, b);
-    if (leftSide) addSweep(deck, a, b, rect(-half, sidewalkFace(-1), -c.asphalt, -0.17), m.concrete);
-    if (rightSide) addSweep(deck, a, b, rect(sidewalkFace(1), half, -c.asphalt, -0.17), m.concrete);
+    if (leftSide) addSweep(deck, a, b, rect(-half, paveEdge(-1), -c.asphalt, -0.17), m.concrete);
+    if (rightSide) addSweep(deck, a, b, rect(paveEdge(1), half, -c.asphalt, -0.17), m.concrete);
+    if (innerOnApproach)
+      for (const [side, on] of [
+        [-1, leftSide],
+        [1, rightSide],
+      ]) {
+        if (!on) continue;
+        const u = (side < 0 ? roadMin : roadMax) + side * layout.innerBarrier;
+        addBarrier(a, b, u, side, c.sidewalkRailing, c.sidewalkRailing === '301' ? null : sidewalkAt(side, u));
+      }
     addMarkings(a, b);
     addMedian(a, b);
     // Approach barriers: none, the bridge railings continued (pedestrian bridges: wheel curb + 20C) or a W-beam.
@@ -706,6 +734,17 @@ export function buildBridge(c, m, { batch = true } = {}) {
     for (const mesh of deck.children.slice(first)) if (mesh.isMesh) clipMeshAtCut(mesh, target, start);
   }
   const waters = addEnvironment(c, m, setting, fills);
+  // Water marks on piers standing in the (first) river.
+  const stain = m.concrete.userData.stain;
+  if (stain) {
+    const axis = waters[0]?.userData.axis;
+    stain.level.value = axis ? waters[0].userData.level : -1e4;
+    if (axis) {
+      stain.centre.value.set(axis.x, axis.z);
+      stain.along.value.set(axis.dx, axis.dz);
+      stain.half.value = axis.half + 2;
+    }
+  }
   const lighting = c.lighting === 'none' ? null : buildLighting(c, m, fills.ranges);
   if (lighting) {
     root.add(lighting.group);

@@ -1,4 +1,4 @@
-// BridgeSketch 3D · Weather: light rain or light snow as one GPU-animated draw call around the camera.
+// BridgeSketch 3D · Weather: light rain, light snow or falling autumn leaves, each one GPU-animated draw call around the camera.
 // Particles wrap inside a 90 × 40 × 90 m box that follows the camera, so the cost is fixed.
 import * as T from 'three';
 
@@ -75,16 +75,63 @@ void main(){
 void main(){float d=length(gl_PointCoord-.5);if(d>.5)discard;gl_FragColor=vec4(vec3(.96,.97,1.),opacity*smoothstep(.5,.1,d));}`,
     }),
   );
-  for (const o of [rain, snow]) {
+  // Falling leaves: 2200 tumbling autumn leaves drifting down at 0.9 m/s in a light breeze.
+  const leafCount = 2200,
+    leafSeed = new Float32Array(leafCount * 3),
+    leafColour = new Float32Array(leafCount * 3),
+    palette = [
+      [0.95, 0.72, 0.16],
+      [0.9, 0.5, 0.12],
+      [0.83, 0.3, 0.1],
+      [0.66, 0.17, 0.1],
+      [0.78, 0.62, 0.22],
+    ];
+  for (let i = 0; i < leafCount; i++) {
+    leafSeed.set([Math.random(), Math.random(), Math.random()], i * 3);
+    leafColour.set(palette[Math.floor(Math.random() * palette.length)], i * 3);
+  }
+  const leafGeometry = new T.BufferGeometry();
+  leafGeometry.setAttribute('position', new T.Float32BufferAttribute(leafSeed, 3));
+  leafGeometry.setAttribute('leafColour', new T.Float32BufferAttribute(leafColour, 3));
+  uniforms.light = { value: 1 };
+  const leaves = new T.Points(
+    leafGeometry,
+    new T.ShaderMaterial({
+      uniforms,
+      transparent: true,
+      depthWrite: false,
+      vertexShader: `${common}
+attribute vec3 leafColour;varying vec3 vColour;varying float vSpin,vFlip;
+void main(){
+  vec3 p=wrap(position,.9,1.6);
+  vec4 view=viewMatrix*vec4(p,1.);
+  gl_Position=projectionMatrix*view;
+  gl_PointSize=clamp(260./-view.z,1.5,14.);
+  vColour=leafColour;
+  vSpin=time*(1.5+2.5*position.x)+position.z*40.;
+  vFlip=.35+.65*abs(sin(time*(1.1+position.y*2.)+position.x*30.));
+}`,
+      fragmentShader: `uniform float opacity,light;varying vec3 vColour;varying float vSpin,vFlip;
+void main(){
+  vec2 q=gl_PointCoord-.5;float c=cos(vSpin),s=sin(vSpin);q=mat2(c,-s,s,c)*q;q.x/=vFlip;
+  // Pointed leaf outline with a midrib.
+  float d=length(vec2(q.x*1.9,q.y))+abs(q.x)*.9;if(d>.48)discard;
+  float rib=1.-smoothstep(.0,.03,abs(q.x))*.25;
+  gl_FragColor=vec4(vColour*light*rib*(.75+.25*vFlip),opacity*smoothstep(.48,.38,d));
+}`,
+    }),
+  );
+  for (const o of [rain, snow, leaves]) {
     o.frustumCulled = false;
     o.visible = false;
     o.renderOrder = 5;
   }
   rain.name = 'Rain';
   snow.name = 'Snow';
+  leaves.name = 'Falling leaves';
   let mode = 'clear';
   return {
-    objects: [rain, snow],
+    objects: [rain, snow, leaves],
     get active() {
       return mode !== 'clear';
     },
@@ -92,7 +139,9 @@ void main(){float d=length(gl_PointCoord-.5);if(d>.5)discard;gl_FragColor=vec4(v
       mode = next;
       rain.visible = mode === 'rain';
       snow.visible = mode === 'snow';
-      uniforms.opacity.value = mode === 'rain' ? 0.55 + 0.4 * daylight : 0.9;
+      leaves.visible = mode === 'leaves';
+      uniforms.opacity.value = mode === 'rain' ? 0.55 + 0.4 * daylight : mode === 'leaves' ? 1 : 0.9;
+      uniforms.light.value = 0.25 + 0.75 * daylight;
     },
     animate(dt, camera) {
       uniforms.time.value += dt;
@@ -101,8 +150,10 @@ void main(){float d=length(gl_PointCoord-.5);if(d>.5)discard;gl_FragColor=vec4(v
     dispose() {
       rainGeometry.dispose();
       snowGeometry.dispose();
+      leafGeometry.dispose();
       rain.material.dispose();
       snow.material.dispose();
+      leaves.material.dispose();
     },
   };
 }

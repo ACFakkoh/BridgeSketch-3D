@@ -1,12 +1,13 @@
 // BridgeSketch 3D · Site: crossings, terrain, approach fills and slopes, river, vegetation and buildings.
 import * as T from 'three';
 import { makeTrain, kenneyGeometry, kenneySize, buildingStyles } from './kenney-scene.mjs';
-import { frame, profile, totalLength, stations, supportStation, waterGroups } from './geometry.mjs';
+import { alignmentStation, frame, girderDepth, profile, totalLength, stations, supportStation, waterGroups } from './geometry.mjs';
 import { beam, box, seeded, soffitAt } from './sections.mjs';
 import { roadsideGuardrail } from './railings.mjs';
 import { positionVehicle, vehicle } from './traffic.mjs';
 import { tuftGeometry, flowerGeometry, scatterMeadow, grassBudget } from './grass.mjs';
 import { addTrees } from './trees.mjs';
+import { effectiveQuality, renderSettings } from './quality.mjs';
 import { RAIL_BED } from './geometry.mjs';
 
 export function crossing(c, s, angle, width, elevation, type) {
@@ -115,7 +116,7 @@ export function terrainSampler(c) {
       ),
     );
   }
-  return (x, z) => {
+  const natural = (x, z) => {
     let y = 0.22 + 0.25 * Math.sin(x * 0.053) * Math.cos(z * 0.072);
     for (const o of obstacles) {
       const p = coordinates(o, x, z),
@@ -129,6 +130,35 @@ export function terrainSampler(c) {
       y = y * (1 - blend) + (o.elevation - (o.type === 'water' ? 0.65 : 0.12)) * blend;
     }
     return y;
+  };
+  if (c.terrainShape !== 'profile') return natural;
+  // « Terrain follows the road profile »: the ground on both sides of the approaches is at road level (no
+  // embankment); a valley is cut under the bridge. Its walls are 2H:1V slopes parallel to each abutment line
+  // (support skew, from the seat level at the abutment face) and parallel to each crossing (road, railway, river
+  // banks), down to the natural valley floor. Nothing rises above the road or into the structure.
+  const L = totalLength(c),
+    deepest = c.material === 'slab' ? (c.variableDepth ? c.pierDepth : c.slabDepth) : c.variableDepth ? c.pierDepth : c.depth,
+    seatDrop = c.asphalt + c.deck + c.haunch + deepest + 0.45;
+  return (x, z) => {
+    const floor = natural(x, z),
+      s = alignmentStation(c, x, z),
+      f = frame(c, Math.max(0, Math.min(L, s))),
+      u = (x - f.x) * f.nx + (z - f.z) * f.nz,
+      start = supportStation(c, 0, u) + 0.9,
+      end = supportStation(c, L, u) - 0.9;
+    let y = profile(c, s) - 0.25;
+    if (s > start - 0.9 && s < end + 0.9) {
+      const inside = Math.max(0, Math.min(s - start, end - s));
+      y = Math.min(y, Math.min(profile(c, start), profile(c, end)) - seatDrop - inside / 2);
+    }
+    for (const o of obstacles) {
+      const p = coordinates(o, x, z),
+        d = Math.abs(p.across - (o.type === 'water' ? riverWiggle(p.along) : 0)),
+        berm = o.type === 'water' ? 3 : 1.5,
+        top = o.type === 'water' ? o.elevation + 0.2 : o.elevation - 0.12;
+      y = Math.min(y, top + Math.max(0, d - o.width / 2 - berm) / 2);
+    }
+    return Math.max(floor, y);
   };
 }
 
@@ -427,6 +457,33 @@ export function crossingCorridors(c, extent = totalLength(c) + 2 * c.approach + 
   return zones;
 }
 
+// Instanced copies grouped in square tiles (tile metres); each tile gets its own bounding sphere for culling.
+function instancedTiles(parent, geometry, material, items, tile, transform, colour) {
+  const tiles = new Map(),
+    meshes = [],
+    dummy = new T.Object3D();
+  for (const item of items) {
+    const key = Math.floor(item.x / tile) + ',' + Math.floor(item.z / tile);
+    if (!tiles.has(key)) tiles.set(key, []);
+    tiles.get(key).push(item);
+  }
+  for (const group of tiles.values()) {
+    const mesh = new T.InstancedMesh(geometry, material, group.length);
+    group.forEach((item, i) => {
+      transform(dummy, item);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+      if (colour) mesh.setColorAt(i, colour(item));
+    });
+    mesh.computeBoundingSphere();
+    mesh.receiveShadow = true;
+    parent.add(mesh);
+    meshes.push(mesh);
+  }
+  if (!meshes.length) geometry.dispose();
+  return meshes;
+}
+
 export function addEnvironment(c, m, parent, fills) {
   const L = totalLength(c),
     ss = stations(c),
@@ -437,6 +494,8 @@ export function addEnvironment(c, m, parent, fills) {
     obstacles = [],
     waters = [],
     ground = c.terrainMode === 'snow' ? m.snow : m.grass,
+    tier = effectiveQuality(c.renderQuality),
+    season = c.terrainMode === 'snow' ? 'snow' : c.terrainMode === 'fall' ? 'fall' : 'summer',
     riverReach = Math.hypot(extent / 2, halfZ) + 8,
     riverSteps = Math.ceil(riverReach);
   for (const finish of ['grass', 'stone', 'concrete']) {
@@ -545,6 +604,7 @@ export function addEnvironment(c, m, parent, fills) {
     river.name = 'Flowing river';
     river.receiveShadow = true;
     river.userData.level = g.elevation;
+    river.userData.axis = { x: o.x, z: o.z, dx: o.dx, dz: o.dz, half: width / 2 };
     parent.add(river);
     waters.push(river);
   }
@@ -803,7 +863,8 @@ export function addEnvironment(c, m, parent, fills) {
   });
   // EZ-Tree species, instanced (trees.mjs); detail follows the render quality.
   for (const t of trees) t.hue = (rng() - 0.5) * 0.06;
-  addTrees(parent, m, trees, rng, { quality: c.renderQuality, snow: c.terrainMode === 'snow' });
+  const forest = addTrees(parent, m, trees, rng, { quality: tier, season, near: renderSettings[tier].treeNear });
+  if (forest) parent.userData.treeLod = forest.lod;
   // Budgeted meadow (grass.mjs): denser near the bridge and in clumps, never on the submerged banks.
   if (c.terrainMode !== 'snow') {
     const nearWater = (x, z) =>
@@ -832,30 +893,33 @@ export function addEnvironment(c, m, parent, fills) {
       halfZ,
       rng,
       seed: c.seed,
-      budget: grassBudget[c.renderQuality] ?? grassBudget.balanced,
+      budget: grassBudget[tier] ?? grassBudget.balanced,
       height: terrainHeight,
       occupied: (x, z, margin) => clearGround(x, z, margin) || nearWater(x, z),
     });
     const green = new T.Color(),
       dry = new T.Color('#e8d59a'),
-      lawn = new T.Color('#b9d98a');
-    const grass = instanced(tuftGeometry(), m.grassBlade, meadow.items, (d, g) => {
+      lawn = new T.Color('#b9d98a'),
+      straw = new T.Color('#d9a95a'),
+      rust = new T.Color('#b9713c');
+    // Meadow tufts in square tiles, so the renderer can frustum-cull what is off screen.
+    const blades = instancedTiles(parent, tuftGeometry(), m.grassBlade, meadow.items, 32, (d, g) => {
       d.position.set(g.x, g.y, g.z);
-      d.scale.set(g.s, g.s * (c.environment === 'urban' ? 0.55 : 1), g.s);
+      d.scale.set(g.s, g.s * (c.environment === 'urban' ? 0.55 : season === 'fall' ? 0.85 : 1), g.s);
       d.rotation.y = g.r;
+    }, g => {
+      green.setRGB(0.8 + rng() * 0.2, 0.86 + rng() * 0.14, 0.72 + rng() * 0.22).lerp(dry, g.dry * 0.45);
+      if (c.environment === 'urban') green.lerp(lawn, 0.35);
+      if (season === 'fall') green.lerp(g.dry > 0.55 ? rust : straw, 0.5 + 0.3 * g.dry);
+      return green;
     });
-    if (grass) {
+    for (const grass of blades) {
       grass.name = 'Meadow blades';
       grass.castShadow = false;
-      meadow.items.forEach((g, i) => {
-        green.setRGB(0.8 + rng() * 0.2, 0.86 + rng() * 0.14, 0.72 + rng() * 0.22).lerp(dry, g.dry * 0.45);
-        if (c.environment === 'urban') green.lerp(lawn, 0.35);
-        grass.setColorAt(i, green);
-      });
     }
     const palette = ['#f4f1e6', '#f2cf55', '#b9a3dd', '#e98f7c'].map(color => new T.Color(color));
     const flowers =
-      c.environment === 'urban'
+      c.environment === 'urban' || season === 'fall'
         ? null
         : instanced(flowerGeometry(), m.grassBlade, meadow.flowers, (d, f) => {
             d.position.set(f.x, f.y, f.z);

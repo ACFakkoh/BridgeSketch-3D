@@ -333,7 +333,7 @@ assert.throws(
   () => validate({ ...c, material: 'box', girders: 2, boxTopWidth: 1.2, boxBottomWidth: 1.7 }),
   /bottom flange/,
 );
-assert.throws(() => validate({ ...c, terrainMode: 'ice' }), /grass or snow/);
+assert.throws(() => validate({ ...c, terrainMode: 'ice' }), /autumn or snow/);
 assert.throws(() => validate({ ...c, sceneWidth: 50 }), /sceneWidth/);
 const featureConfig = validate(
   fitBoxLayout({
@@ -942,6 +942,101 @@ for (const v of [
   const railway = buildBridge(makePreset('weathered'), materials, { batch: false });
   assert.ok(railway.setting.children.some(o => o.name === 'Railway ballast'));
   disposeModel(railway);
+}
+// 0.5.5: barriers 311 / 311A, 12 m street lights, reveal, structural systems, terrain shape, seasons, quality.
+{
+  const { concreteBarrier, edgeWidth, barrierHeight, RAIL_311A } = await import('../deck-profiles.mjs');
+  const { psboxLayout, monolithicSupport, archSpanIndex, isConcreteDeck, stations } = await import('../geometry.mjs');
+  const { psboxParts, clockwise } = await import('../systems.mjs');
+  const { guessTier, effectiveQuality, stepDownAuto, renderSettings } = await import('../quality.mjs');
+  const { streetLightGeometry, POLE_HEIGHT, ARM_REACH } = await import('../lighting.mjs');
+  const { terrainSampler } = await import('../terrain.mjs');
+  const named = (model, pattern) => {
+    let n = 0;
+    model.root.traverse(o => o.isMesh && pattern.test(o.name) && n++);
+    return n;
+  };
+  const base = makePreset('river');
+  // Type 311: 880 mm, 460 mm base, 275 mm top; 311A adds a rail 400 mm above the concrete.
+  const b311 = concreteBarrier('311', 0, -1, 0);
+  assert.equal(edgeWidth('311'), 0.46);
+  assert.equal(barrierHeight('311A'), 0.88);
+  assert.ok(Math.abs(Math.max(...b311.map(p => p[1])) - 0.88) < 1e-9);
+  assert.ok(Math.abs(Math.max(...b311.filter(p => p[1] > 0.87).map(p => p[0])) - 0.275) < 1e-9, '311 top is 275 mm');
+  assert.equal(RAIL_311A.spacing, 2.4);
+  const rail = buildBridge(validate({ ...base, leftRailing: '311A', rightRailing: '311' }), materials, { batch: false });
+  assert.ok(rail.deck.children.length > 0);
+  disposeModel(rail);
+  // 12 m street light with a 3 m single davit arm; lights hide with Reveal structure (app) through model.lighting.
+  const kit = streetLightGeometry();
+  kit.metal.computeBoundingBox();
+  assert.ok(Math.abs(kit.metal.boundingBox.max.y - (POLE_HEIGHT + 0.26)) < 0.05, 'pole and finial reach 12 m');
+  assert.ok(kit.metal.boundingBox.max.x >= ARM_REACH - 0.06 && kit.metal.boundingBox.min.x > -0.3, 'one arm, 3 m reach');
+  const lit = buildBridge(validate({ ...base, lighting: 'poles' }), materials, { batch: false });
+  assert.ok(lit.lighting.group.children.some(o => o.isInstancedMesh && o.name === 'Street light poles'));
+  disposeModel(lit);
+  // Approach pavement reaches the sidewalk face when a Type 301 protects the sidewalk on the bridge only.
+  const walkway = validate({ ...base, sidewalkSide: 'right', sidewalkRailing: '301', approachBarrier: 'guardrail' });
+  assert.ok(buildBridge(walkway, materials, { batch: false }).deck.children.length > 0);
+  // Prestressed box girder: continuous, bearings under the webs, closed clockwise parts, deeper at piers.
+  const box = validate({ ...base, material: 'psbox', depth: 2.2, variableDepth: true, pierDepth: 3.6, continuous: false });
+  assert.ok(box.continuous && isConcreteDeck(box) && box.girders === 2);
+  assert.ok(psboxLayout(box, 3.6).bottom < psboxLayout(box, 2.2).bottom, 'bottom slab narrows where the box deepens');
+  for (const part of psboxParts(box, () => 2.2).parts) assert.deepEqual(part, clockwise(part));
+  assert.equal(validate({ ...box, width: 18 }).girders, 3, 'two cells above 16 m');
+  assert.throws(() => validate({ ...box, depth: 1 }), /1\.2 m/);
+  const boxModel = buildBridge(box, materials, { batch: false });
+  assert.equal(named(boxModel, /^Box girder part$/), 5);
+  assert.equal(named(boxModel, /Box girder diaphragm/), box.spans.length + 1);
+  disposeModel(boxModel);
+  // Rigid frame: no bearings at all; strutted frame: two inclined legs, bearings only at the abutments.
+  const rigid = validate({ ...base, structureSystem: 'frame', material: 'steel' });
+  assert.equal(rigid.material, 'psbox');
+  assert.ok(stations(rigid).every((_, j) => monolithicSupport(rigid, j)));
+  const frameModel = buildBridge(rigid, materials, { batch: false });
+  assert.equal(named(frameModel, /Bearing plinth/), 0);
+  disposeModel(frameModel);
+  assert.throws(() => validate({ ...base, structureSystem: 'strutted', spans: base.spans.slice(0, 2) }), /three spans/);
+  const strut = makePreset('strutted'),
+    strutModel = buildBridge(strut, materials, { batch: false });
+  assert.equal(named(strutModel, /Strutted frame leg/), 2);
+  assert.equal(named(strutModel, /Bearing plinth/), 2 * strut.girders, 'bearings at the two abutments only');
+  disposeModel(strutModel);
+  // Arches: the longest span by default; ribs, hangers and bracing; deck arch columns under the deck.
+  const tied = makePreset('tied-arch'),
+    tiedModel = buildBridge(tied, materials, { batch: false });
+  assert.equal(archSpanIndex(tied), 0);
+  assert.equal(named(tiedModel, /^Arch rib$/), 2);
+  assert.ok(named(tiedModel, /^Hanger$/) >= 30 && named(tiedModel, /Wind brace/) > 0);
+  disposeModel(tiedModel);
+  const deckArch = makePreset('deck-arch'),
+    archModel = buildBridge(deckArch, materials, { batch: false });
+  assert.equal(archSpanIndex(deckArch), 1);
+  assert.ok(named(archModel, /Spandrel column|Crown block/) >= 8);
+  disposeModel(archModel);
+  assert.throws(() => validate({ ...base, structureSystem: 'arch', archRise: 0.5 }), /rise/);
+  // Terrain following the road profile: road level beside the approaches, never above the road, valley below.
+  const cut = validate({ ...makePreset('tied-arch'), terrainShape: 'profile' }),
+    ground = terrainSampler(cut),
+    far = frame(cut, -25, 0);
+  assert.ok(Math.abs(ground(far.x, 25) - (profile(cut, -25) - 0.25)) < 0.3, 'ground at road level beside the approach');
+  const mid = frame(cut, totalLength(cut) / 2, 0);
+  assert.ok(ground(mid.x, mid.z) < 1, 'valley floor under the arch');
+  assert.throws(() => validate({ ...base, terrainShape: 'hill' }), /terrain/);
+  // Seasons and weather; render tiers.
+  assert.equal(validate({ ...base, terrainMode: 'fall', weather: 'leaves' }).weather, 'leaves');
+  const autumn = buildBridge(validate({ ...base, terrainMode: 'fall' }), materials, { batch: false });
+  assert.ok(autumn.setting.children.some(o => o.isInstancedMesh && o.material === materials.leavesFall.oak));
+  assert.equal(typeof autumn.setting.userData.treeLod, 'function');
+  disposeModel(autumn);
+  assert.equal(defaults.renderQuality, 'balanced');
+  assert.equal(guessTier('ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11)'), 'performance');
+  assert.equal(guessTier('ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Laptop GPU)'), 'high');
+  assert.equal(guessTier('ANGLE (Intel, Intel(R) Iris(R) Xe Graphics)'), 'balanced');
+  assert.equal(effectiveQuality('high'), 'high');
+  assert.ok(renderSettings.balanced.pixelRatio < renderSettings.high.pixelRatio);
+  assert.equal(stepDownAuto('performance'), null);
+  for (const p of presets) assert.ok(makePreset(p.id).renderQuality === 'balanced', p.id + ' defaults to Balanced');
 }
 for (const m of Object.values(materials)) (m.isMaterial ? [m] : Object.values(m)).forEach(x => x.dispose());
 const html = await readFile('index.html', 'utf8');

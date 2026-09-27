@@ -2,6 +2,24 @@
 
 Mise à jour : 2026-09-27. Source de vérité pour les changements locaux et leur état de publication.
 
+## 0.5.5 — directives Notion « Bridge Sketch 3D directives 2026-09-27 V2 suite » (local, non publié)
+
+- [x] Arbres réduits (5–10,5 m) par rapport au tablier.
+- [x] Trou dans la chaussée d'approche avec une glissière 301 devant le trottoir : la chaussée va jusqu'à la face du trottoir; la glissière 301 continue seulement avec « Continue the bridge railings ».
+- [x] Lampadaires 12 m, une seule potence cintrée de 3,0 m (projection horizontale), contre-fiche et entretoises, luminaire DEL plat; instanciés.
+- [x] Lampadaires masqués avec « Reveal structure ».
+- [x] Nom « Anthony Chéruel » et version sur l'animation de lancement.
+- [x] Glissière Type 311 (880 / 460 / 275 mm) et 311 A+B : lisse acier 200 × 150 mm, 400 mm au-dessus du béton, poteaux aux 2 400 mm (3D et coupe).
+- [x] Performance : Balanced par défaut; réglage Auto (nom du GPU, puis baisse d'un niveau sous 24 fps); LOD arbres (géométrie « far ») et herbe (amincissement en distance, tuiles de 32 m); ombres recalculées seulement si nécessaire; animation ambiante à 30 fps; réflexion une image sur deux caméra immobile; compteur Stats (fps, CPU, GPU par timer query, appels, triangles).
+- [x] Animation de départ : shaders compilés avant la première image (compileAsync), dessin révélé par transformations (compositeur), sans filtres ni flou animés.
+- [x] Essai WebGPU : page `lab/webgpu-meadow.html` (Three.js r180 WebGPURenderer, TSL) — herbe (150 000 à 600 000 brins) et pluie (60 000 gouttes) en compute shaders; repli WebGL 2 (`?webgl`). Le visualiseur reste en WebGL 2 (tous les shaders personnalisés sont en GLSL).
+- [x] Ombres de nuages mobiles (patch global du terme d'ombre du soleil) et traces d'eau sur les piles dans la rivière (bande humide, coulures, algues).
+- [x] Terrain « Follows the road profile » : sol au niveau de la route de part et d'autre des approches, vallée sous le pont en talus 2H:1V parallèles aux culées et aux obstacles.
+- [x] Automne : couleurs jaune/orange/rouge des arbres, prairie paille et feuilles au sol; météo « Falling leaves ».
+- [x] Nouveaux types : caisson en béton précontraint, portique (sans appareils d'appui), pont à béquilles, arc sous tablier (béton ou acier) et arc à tablier inférieur (bowstring) avec suspentes et contreventement; cinq nouveaux préréglages.
+- [x] Vérifications : `node check.mjs` (nouveaux contrôles 0.5.5), captures Chromium/SwiftShader des cinq nouveaux préréglages, coupe du caisson, Reveal, nuit, automne.
+- [ ] À valider par Anthony sur son portable : fps en Balanced et Auto (case Stats), page WebGPU, puis archives et push GitHub.
+
 ## Correctifs et fonctionnalités — commentaires Notion du 2026-09-27 (local, non publié)
 
 - [x] Options par défaut pour tous les préréglages : nuages dynamiques, rivière miroir calme, qualité High, brume atmosphérique.

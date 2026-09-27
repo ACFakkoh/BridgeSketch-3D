@@ -1,7 +1,9 @@
-// BridgeSketch 3D · Launch sequence (< 5 s): a blueprint elevation of a three-span haunched bridge draws
-// itself (supports, soffit, deck, railings, dimension chain), the wordmark resolves, a progress rule follows
+// BridgeSketch 3D · Launch sequence (< 5 s): a blueprint elevation of a three-span haunched bridge is swept
+// in by a scan line (supports, soffit, deck, railings, dimension chain), the wordmark resolves, a progress rule follows
 // the real start-up, then the sheet lifts off the live 3D scene while the camera settles on the bridge.
 // Any click or key skips it; reduced-motion users get a short fade.
+
+import { release } from './release.mjs';
 
 const svg = `
 <svg viewBox="0 0 1200 420" aria-hidden="true" class="intro-drawing">
@@ -26,7 +28,6 @@ const svg = `
     <path pathLength="1" class="d thin" style="--d:1.05s" d="M112 214Q600 192 1088 214"/>
     <path pathLength="1" class="d thin posts" style="--d:1.15s" d="M150 227v-13M230 224v-13M310 222v-13M390 220v-13M470 218v-13M550 217v-13M630 217v-13M710 218v-13M790 219v-13M870 221v-13M950 223v-13M1030 226v-13"/>
   </g>
-  <rect class="intro-scan" x="0" y="120" width="160" height="240" fill="url(#introGlow)" opacity=".18"/>
 </svg>`;
 
 export function startIntro() {
@@ -35,10 +36,13 @@ export function startIntro() {
     root = document.createElement('div');
   root.id = 'intro';
   root.className = reduce ? 'intro reduced' : 'intro';
-  root.innerHTML = `<div class="intro-grid"></div>${svg}
+  // The drawing is revealed by two counter-moving transforms (compositor only), so it keeps a steady frame
+  // rate while the main thread builds the scene and compiles the shaders.
+  root.innerHTML = `<div class="intro-grid"></div><div class="intro-reveal"><div class="intro-reveal-inner">${svg}</div></div>
     <div class="intro-brand">
       <h1>Bridge<span>Sketch</span> <em>3D</em></h1>
       <p>A quick visual tool for bridge concepts</p>
+      <p class="intro-author">by ${release.author} · v${release.version}</p>
       <div class="intro-progress"><i></i></div>
       <small class="intro-status">Preparing the site\u2026</small>
     </div>

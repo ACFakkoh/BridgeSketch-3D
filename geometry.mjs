@@ -42,7 +42,7 @@ export const defaults = {
   trafficMode: 'vehicles',
   waterStyle: 'glossy',
   skyMode: 'clouds',
-  renderQuality: 'high',
+  renderQuality: 'balanced',
   fog: true,
   weather: 'clear',
   bentWidth: 1.9,
@@ -72,6 +72,7 @@ export const defaults = {
   approachConeMaterial: 'grass',
   environment: 'rural',
   terrainMode: 'grass',
+  terrainShape: 'natural',
   sceneWidth: 140,
   background: 'blue',
   timeOfDay: 17.5,
@@ -79,9 +80,40 @@ export const defaults = {
   trainStyle: 'mixed',
   medianType: 'none',
   medianWidth: 1.2,
+  // Structural system (0.5.5): simply supported / continuous girders, rigid frame (portique), strutted frame
+  // (béquilles) or arch (deck arch with spandrel columns, or tied through arch above the deck).
+  structureSystem: 'girder',
+  strutAngle: 30,
+  archType: 'deck',
+  archMaterial: 'concrete',
+  archSpan: -1,
+  archRise: 0.18,
   spans: [25, 25, 25].map(length => ({ length, obstacle: 'water', width: 22, elevation: 0, angle: 90 })),
 };
 export const depths = [1, 1.2, 1.4, 1.6, 1.8];
+// Cast-in-place and prestressed concrete superstructures: solid slab and box girder (« psbox »).
+export const isConcreteDeck = c => c.material === 'slab' || c.material === 'psbox';
+// Prestressed box girder layout: outer web faces at the top slab, 1:4.5 web batter, 450 mm webs, one cell up
+// to 16 m of deck, two cells above. The bottom slab narrows where the box deepens at supports.
+export function psboxLayout(c, depth = c.depth) {
+  const half = c.width / 2,
+    top = Math.max(1.3, Math.min(half - 1.1, 0.29 * c.width)),
+    deepest = c.variableDepth ? Math.max(c.pierDepth, c.depth) : c.depth,
+    batter = Math.min(0.22, (top - 1.05) / Math.max(0.5, deepest - c.deck)),
+    bottom = top - batter * (depth - c.deck);
+  return { half, top, bottom, batter, web: 0.45, cells: c.width > 16 ? 2 : 1, slab: 0.25 };
+}
+// Supports without bearings: every support of a rigid frame, the leg joints of a strutted frame.
+export function monolithicSupport(c, j) {
+  const last = c.spans.length;
+  if (c.structureSystem === 'frame') return true;
+  return c.structureSystem === 'strutted' && (j === 1 || j === last - 1) && j > 0 && j < last;
+}
+// Arch span: the chosen span, or the longest one.
+export function archSpanIndex(c) {
+  if (c.archSpan >= 0 && c.archSpan < c.spans.length) return c.archSpan;
+  return c.spans.reduce((best, s, i) => (s.length > c.spans[best].length ? i : best), 0);
+}
 // Railway ballast raises the top of the sleepers 0.5 m above the crossing elevation.
 export const RAIL_BED = 0.5;
 export const totalLength = c => c.spans.reduce((n, s) => n + s.length, 0);
@@ -258,14 +290,14 @@ export function validate(raw) {
   c.deck = Number(c.deck);
   if (![0.2, 0.225, 0.25].includes(c.deck)) throw Error('Slab thickness: select 200, 225 or 250 mm.');
   if (typeof c.fog !== 'boolean') throw Error('Invalid atmospheric haze option.');
-  if (!['clear', 'rain', 'snow'].includes(c.weather)) throw Error('Select clear, rain or snow weather.');
+  if (!['clear', 'rain', 'snow', 'leaves'].includes(c.weather)) throw Error('Select the weather: clear, rain, snow or falling leaves.');
   if (
     !['vehicles', 'cyclists'].includes(c.trafficMode) ||
     !['natural', 'glossy'].includes(c.waterStyle) ||
     !['clear', 'clouds'].includes(c.skyMode)
   )
     throw Error('Select traffic, water and sky styles.');
-  if (!['performance', 'balanced', 'high'].includes(c.renderQuality)) throw Error('Select a render quality.');
+  if (!['auto', 'performance', 'balanced', 'high'].includes(c.renderQuality)) throw Error('Select a render quality.');
   const cycling = c.trafficMode === 'cyclists';
   const limits = {
     width: [cycling ? 3 : 4, 30],
@@ -320,8 +352,8 @@ export function validate(raw) {
   )
     throw Error('Invalid abutment slope finish.');
   if (
-    !['201', '301', '210A', '210C', '20C'].includes(c.leftRailing) ||
-    !['201', '301', '210A', '210C', '20C'].includes(c.rightRailing) ||
+    !['201', '301', '311', '311A', '210A', '210C', '20C'].includes(c.leftRailing) ||
+    !['201', '301', '311', '311A', '210A', '210C', '20C'].includes(c.rightRailing) ||
     !['none', '301', '210A', '210C', '20C'].includes(c.sidewalkRailing)
   )
     throw Error('Invalid railing selection.');
@@ -343,7 +375,7 @@ export function validate(raw) {
   if (
     typeof c.continuous !== 'boolean' ||
     !(Object.hasOwn(steelFinishes, c.steelColor) || /^#[0-9A-F]{6}$/.test(c.steelColor)) ||
-    !['concrete', 'steel', 'box', 'slab'].includes(c.material) ||
+    !['concrete', 'steel', 'box', 'slab', 'psbox'].includes(c.material) ||
     !['concrete', 'steel'].includes(c.barrierType) ||
     !['return', 'wing'].includes(c.abutmentType) ||
     !['none', 'left', 'right', 'both'].includes(c.sidewalkSide) ||
@@ -353,8 +385,28 @@ export function validate(raw) {
     c.columns > 6
   )
     throw Error('Invalid material, barrier, wall, sidewalk or pier configuration.');
+  if (!['girder', 'frame', 'strutted', 'arch'].includes(c.structureSystem)) throw Error('Select a structural system.');
+  if (
+    !['deck', 'tied'].includes(c.archType) ||
+    !['concrete', 'steel'].includes(c.archMaterial) ||
+    !Number.isInteger(c.archSpan) ||
+    typeof c.archRise !== 'number' ||
+    !(c.archRise >= 0.1 && c.archRise <= 0.35) ||
+    typeof c.strutAngle !== 'number' ||
+    !(c.strutAngle >= 15 && c.strutAngle <= 45)
+  )
+    throw Error('Arch: deck or tied, concrete or steel, rise 0.10–0.35 of the span; strut angle 15–45°.');
+  // Frames are monolithic concrete: a box girder unless a solid slab was chosen; always continuous.
+  if (c.structureSystem === 'frame' || c.structureSystem === 'strutted') {
+    if (!isConcreteDeck(c)) c.material = 'psbox';
+    c.continuous = true;
+  }
+  if (c.structureSystem === 'strutted' && c.spans.length < 3)
+    throw Error('A strutted frame needs at least three spans: side span, main span between the legs, side span.');
+  if (c.material === 'psbox') c.continuous = true;
   if (!['mixed', 'diesel', 'bullet', 'city'].includes(c.trainStyle)) throw Error('Select a train style.');
-  if (!['grass', 'snow'].includes(c.terrainMode)) throw Error('Select grass or snow terrain.');
+  if (!['natural', 'profile'].includes(c.terrainShape)) throw Error('Select a natural or profile-following terrain.');
+  if (!['grass', 'fall', 'snow'].includes(c.terrainMode)) throw Error('Select summer grass, autumn or snow terrain.');
   if (
     !['rural', 'urban', 'none'].includes(c.environment) ||
     !['crest', 'constant'].includes(c.profile) ||
@@ -382,6 +434,8 @@ export function validate(raw) {
   )
     throw Error('Select a median type and an island width from 0.6 to 4 m.');
   if (c.medianType !== 'none' && c.laneCount < 2) throw Error('A centre median needs at least two lanes.');
+  if (c.material === 'psbox' && c.depth < 1.2) throw Error('Box girder depth: at least 1.2 m.');
+  if (c.material === 'psbox' && c.width < 7) throw Error('A concrete box girder needs a deck at least 7 m wide.');
   if (c.variableDepth && c.pierDepth < (c.material === 'slab' ? c.slabDepth : c.depth))
     throw Error('Depth at piers must be at least the typical girder depth.');
   if (c.material === 'box') {
@@ -405,9 +459,15 @@ export function validate(raw) {
     if (!['road', 'rail', 'water'].includes(v.obstacle)) throw Error(`Span ${i + 1}: select road, railway or water.`);
     return v;
   });
+  // Box girder: bearings under the webs (two, or three with a centre web), set from the section at the supports.
+  if (c.material === 'psbox') {
+    const box = psboxLayout(c, c.variableDepth ? c.pierDepth : c.depth);
+    c.girders = box.cells + 1;
+    c.overhang = Number((box.half - Math.max(0.6, box.bottom - 0.45)).toFixed(3));
+  }
   if (c.girders === 1 && c.material !== 'box') throw Error('One girder is available for steel box bridges only.');
   if (
-    c.material !== 'slab' &&
+    !isConcreteDeck(c) &&
     c.girders > 1 &&
     spacing(c) < (c.material === 'concrete' ? 1.3 : c.material === 'box' ? c.boxTopWidth + 0.2 : 0.65)
   )
@@ -515,7 +575,7 @@ export function supportStation(c, station, u) {
   return s;
 }
 export function girderTop(c, i, s) {
-  if (c.material === 'slab') return profile(c, s) - c.asphalt;
+  if (isConcreteDeck(c)) return profile(c, s) - c.asphalt;
   const ss = stations(c),
     a = ss[i],
     b = ss[i + 1];

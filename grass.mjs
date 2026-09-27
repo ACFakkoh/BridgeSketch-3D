@@ -14,6 +14,9 @@ export const grassUniforms = {
   sunDirection: { value: new T.Vector3(0, 1, 0) },
   sunColor: { value: new T.Color('#fff') },
   backlight: { value: 1 },
+  // Distance thinning (level of detail): full density up to grassNear, 18 % beyond grassFar.
+  grassNear: { value: 26 },
+  grassFar: { value: 90 },
 };
 
 export function prepareGrassMaterial(material) {
@@ -21,14 +24,14 @@ export function prepareGrassMaterial(material) {
   material.vertexColors = true;
   material.color.set('#ffffff');
   material.roughness = 0.78;
-  material.customProgramCacheKey = () => 'bridgesketch-meadow-060';
+  material.customProgramCacheKey = () => 'bridgesketch-meadow-055-lod';
   material.onBeforeCompile = shader => {
     Object.assign(shader.uniforms, grassUniforms);
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
         `#include <common>
-uniform float grassTime,windStrength;uniform vec2 windDirection;varying float vGrassHeight;varying vec3 vGrassWorld;`,
+uniform float grassTime,windStrength,grassNear,grassFar;uniform vec2 windDirection;varying float vGrassHeight;varying vec3 vGrassWorld;`,
       )
       .replace(
         '#include <beginnormal_vertex>',
@@ -41,6 +44,10 @@ vGrassHeight=uv.y;
 #ifdef USE_INSTANCING
 {
   mat4 grassMatrix=modelMatrix*instanceMatrix;vec3 root=grassMatrix[3].xyz;
+  // Level of detail: each tuft has a random rank; far tufts shrink to nothing once the density drops below it.
+  float rank=fract(sin(dot(root.xz,vec2(12.9898,78.233)))*43758.5453);
+  float density=1.-.82*smoothstep(grassNear,grassFar,distance(root.xz,cameraPosition.xz));
+  transformed*=smoothstep(rank-.06,rank,density);
   vec2 across=vec2(-windDirection.y,windDirection.x);
   float gust=smoothstep(.25,1.,.5+.5*sin(dot(root.xz,windDirection)*.045-grassTime*.55));
   float wave=sin(dot(root.xz,windDirection)*.42+grassTime*1.7)+.35*sin(dot(root.xz,across)*.77+grassTime*1.13);

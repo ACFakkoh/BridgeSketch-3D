@@ -18,7 +18,9 @@ import {
   girderTop,
   girderDepth,
   supportStation,
+  archSpanIndex,
 } from './geometry.mjs';
+import { psboxParts } from './systems.mjs';
 import { release } from './release.mjs';
 import { presets, makePreset } from './presets.mjs';
 import {
@@ -34,11 +36,23 @@ import {
   frameShadows,
 } from './scene.mjs';
 import { makeSky } from './sky.mjs';
-import { CURB_HEIGHT, concreteBarrier, isConcrete, sidewalkProfile, sidewalkTop, wheelCurb } from './deck-profiles.mjs';
+import {
+  CURB_HEIGHT,
+  RAIL_311A,
+  barrierHeight,
+  barrierTopCentre,
+  concreteBarrier,
+  isConcrete,
+  sidewalkProfile,
+  sidewalkTop,
+  wheelCurb,
+} from './deck-profiles.mjs';
 import { createPlanarReflection } from './water.mjs';
 import { lightsOn } from './lighting.mjs';
 import { makeWeather } from './weather.mjs';
 import { grassUniforms } from './grass.mjs';
+import { cloudShadow } from './materials.mjs';
+import { renderSettings, effectiveQuality, setGpuName, stepDownAuto, gpuInfo } from './quality.mjs';
 
 const $ = id => document.getElementById(id),
   form = $('parameters');
@@ -66,12 +80,22 @@ let needsRender = true,
   reflectionMs = 0,
   envDirty = true,
   envAt = 0;
-// Render budgets: planar reflection scale, shadow map size and pixel-ratio cap (meadow density in grass.mjs).
-const quality = {
-  performance: { reflection: 0, shadow: 2048, pixelRatio: 1.25 },
-  balanced: { reflection: 0.5, shadow: 4096, pixelRatio: 1.6 },
-  high: { reflection: 0.75, shadow: 4096, pixelRatio: 2 },
-};
+// Frame budget (0.5.5): the sun's shadow map is redrawn only when something that casts a shadow changes
+// (rebuild, time of day, moving traffic at about 11 Hz, tree level-of-detail swaps at 2 Hz); ambient
+// animation alone (water, clouds, wind, weather) renders at 30 fps; the reflection is refreshed every other
+// frame while the camera is still.
+let shadowDirty = true,
+  shadowSoft = false,
+  shadowAt = 0,
+  lastInteraction = 0,
+  lastFrameAt = 0,
+  frameCount = 0,
+  cameraKey = '',
+  bootAt = 0;
+// Render budgets per tier (quality.mjs): reflection scale, shadow map, pixel ratio, level-of-detail distances.
+const tier = () => renderSettings[effectiveQuality(config.renderQuality)];
+// Frame statistics for the Stats overlay and the Auto quality: loop rate, CPU time and GPU time (timer query).
+const perf = { frames: 0, since: 0, fps: 0, cpu: 0, gpu: null, lowSince: null, query: null, ext: null };
 function notify(message, error = false) {
   clearTimeout(messageTimer);
   $('feedback').replaceChildren(document.createTextNode(message));
@@ -136,6 +160,9 @@ function initWorkspace() {
   $('activeSpan').onchange = selectSpan;
 }
 function refreshForm() {
+  $('archSpan').innerHTML =
+    `<option value="-1">Longest span (${archSpanIndex({ ...config, archSpan: -1 }) + 1})</option>` +
+    config.spans.map((span, i) => `<option value="${i}">Span ${i + 1} · ${span.length} m</option>`).join('');
   for (const el of form.elements) {
     if (!el.name) continue;
     if (el.type === 'checkbox') el.checked = config[el.name];
@@ -199,14 +226,24 @@ function syncWaterFields() {
 function syncEnabled() {
   const steel = config.material === 'steel' || config.material === 'box',
     box = config.material === 'box',
-    slab = config.material === 'slab';
-  $('nebt-label').hidden = steel || slab;
-  $('steel-depth-label').hidden = !steel;
+    psbox = config.material === 'psbox',
+    slab = config.material === 'slab',
+    system = config.structureSystem;
+  $('arch-fields').hidden = system !== 'arch';
+  form.elements.archRise.disabled = config.archType !== 'tied';
+  $('strut-fields').hidden = system !== 'strutted';
+  // Frames are monolithic concrete: solid slab or prestressed box only.
+  for (const option of form.elements.material.options)
+    option.disabled = (system === 'frame' || system === 'strutted') && !['slab', 'psbox'].includes(option.value);
+  form.elements.continuous.disabled = psbox || system === 'frame' || system === 'strutted';
+  $('nebt-label').hidden = steel || slab || psbox;
+  $('steel-depth-label').hidden = !steel && !psbox;
   $('slab-depth-label').hidden = !slab;
   $('steel-color-controls').hidden = !steel;
   $('flange-note').hidden = !steel;
   $('box-bottom-width-label')?.toggleAttribute('hidden', !box);
-  for (const name of ['girders', 'overhang']) form.elements[name].disabled = slab || (box && name === 'overhang');
+  for (const name of ['girders', 'overhang'])
+    form.elements[name].disabled = slab || psbox || (box && name === 'overhang');
   $('variable-depth-fields').hidden = false;
   form.elements.variableDepth.disabled = false;
   form.elements.pierDepth.disabled = !config.variableDepth;
@@ -261,7 +298,14 @@ function syncEnabled() {
   $('column-diameter-label').hidden = config.pierType !== 'bent';
   $('wall-settings').hidden = config.pierType !== 'wall';
   $('hammerhead-settings').hidden = config.pierType !== 'hammerhead';
-  $('continuity-note').textContent = slab
+  $('continuity-note').textContent =
+    system === 'frame'
+      ? 'Rigid frame: deck built into every support, no bearings.'
+      : system === 'strutted'
+        ? 'Strutted frame: deck built into the inclined legs; bearings at the abutments only.'
+        : psbox
+          ? 'Cast-in-place box, continuous over the piers.'
+          : slab
     ? config.continuous
       ? 'Continuous solid slab across supports.'
       : 'Solid slab spans with joints at supports.'
@@ -270,12 +314,14 @@ function syncEnabled() {
       : steel
         ? 'Unbroken girders and one bearing line at each pier.'
         : 'Precast spans joined with concrete closure diaphragms.';
-  form.elements.material.options[0].disabled = config.curved;
+  form.elements.material.options[0].disabled = config.curved || system === 'frame' || system === 'strutted';
   form.elements.radius.disabled = !config.curved;
   form.elements.direction.disabled = !config.curved;
   form.elements.rise.disabled = config.profile !== 'crest';
   form.elements.grade.disabled = config.profile !== 'constant';
-  $('material-note').textContent = slab
+  $('material-note').textContent = psbox
+    ? `Prestressed concrete box · ${config.width > 16 ? 'two cells' : 'one cell'}, inclined webs, depth from the deck top`
+    : slab
     ? config.variableDepth
       ? 'Solid concrete slab · variable depth'
       : 'Solid concrete slab · constant depth'
@@ -299,7 +345,7 @@ function readForm() {
     raw[el.name] =
       el.type === 'checkbox'
         ? el.checked
-        : el.type === 'number' || el.name === 'direction'
+        : el.type === 'number' || el.name === 'direction' || el.name === 'archSpan'
           ? Number(el.value)
           : el.value;
   }
@@ -318,6 +364,7 @@ function applyTimeOfDay(hour) {
     new T.Color(night).lerp(new T.Color(day), daylight).lerp(new T.Color(gold), golden);
   const { hemi, sun, fill, rim } = scene.userData.lights;
   sun.position.set(Math.cos(angle) * 80, 8 + 60 * Math.max(0, Math.sin(angle)), 40);
+  shadowDirty = true;
   sun.color.copy(tint('#a9c7ed', '#fff3dd', '#ff9a68'));
   sun.intensity = 0.4 + 2.8 * daylight - golden;
   hemi.color.copy(tint('#7186a8', '#e1efff', '#ffc98f'));
@@ -345,13 +392,16 @@ function applyTimeOfDay(hour) {
   scene.environmentIntensity = 0.25 + 0.75 * daylight - 0.1 * golden;
   model?.lighting?.setOn(lightsOn(hour));
   // Rain and snow: overcast sky, softer key light, denser haze.
-  const wet = config.weather !== 'clear';
+  const wet = config.weather === 'rain' || config.weather === 'snow';
   if (wet) {
     sun.intensity *= 0.4;
     fill.intensity *= 0.7;
     hemi.intensity *= 0.9;
   }
   sky?.uniforms && (sky.uniforms.overcast.value = wet ? 1 : 0);
+  // Drifting cloud shadows with the dynamic sky, strongest in full daylight; soft under overcast skies.
+  cloudShadow.strength.value =
+    config.skyMode === 'clouds' || wet ? (wet ? 0.18 : 0.42) * daylight * (1 - 0.6 * golden) : 0;
   weather?.set(config.weather, daylight);
   // Stylised atmospheric haze: cool by day, peach at golden hour, deep blue at night (option).
   const radius = scene.userData.radius ?? 120,
@@ -477,6 +527,17 @@ function renderSection() {
       [...us.map(u => [u, -0.065]), ...[...us].reverse().map(u => [u, -0.065 - depthAt(u)])],
       '#a7a49a',
     );
+  } else if (c.material === 'psbox') {
+    for (const part of psboxParts(c, depthAt).parts) drawing += concrete(part, '#aba79a');
+    drawing += concrete(
+      [
+        [-half, -0.065],
+        [half, -0.065],
+        [half, -0.065 - c.deck],
+        [-half, -0.065 - c.deck],
+      ],
+      '#b9b6aa',
+    );
   } else {
     for (let g = 0; g < c.girders; g++) {
       const u = -half + c.overhang + g * spacing(c),
@@ -570,7 +631,18 @@ function renderSection() {
           );
   for (const u of road.laneEdges) drawing += rectangle(u - 0.04, u + 0.04, 0.012, 0.004, '#f5f2e7');
   const railing = (edge, side, type, raised = null) => {
-    if (isConcrete(type)) return concrete(concreteBarrier(type, edge, side, raised ?? -0.065), '#a9a79d');
+    if (isConcrete(type)) {
+      let result = concrete(concreteBarrier(type, edge, side, raised ?? -0.065), '#a9a79d');
+      // Type 311A: steel tube rail on a post, 400 mm above the concrete.
+      if (type === '311A') {
+        const r = RAIL_311A,
+          u = edge - side * barrierTopCentre(type),
+          top = (raised ?? -0.065) + barrierHeight(type);
+        result += rectangle(u - r.post / 2, u + r.post / 2, top + r.rise - r.depth, top, '#879597');
+        result += rectangle(u - r.width / 2, u + r.width / 2, top + r.rise, top + r.rise - r.depth, '#879597');
+      }
+      return result;
+    }
     // No wheel curb on a raised sidewalk: posts are anchored in the sidewalk.
     const curb = raised === null ? CURB_HEIGHT - 0.065 : raised,
       u = edge - side * (raised === null ? 0.18 : 0.12),
@@ -625,7 +697,7 @@ function renderSection() {
     bx = svgWidth - 300,
     escape = t => t.replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
   const titleBlock = `<g font-size="12" fill="#17374b"><rect x="${bx}" y="492" width="280" height="92" fill="#fff" stroke="#17374b" stroke-width="1.2"/><line x1="${bx}" x2="${bx + 280}" y1="518" y2="518" stroke="#17374b"/><line x1="${bx}" x2="${bx + 280}" y1="540" y2="540" stroke="#8aa1a7"/><line x1="${bx}" x2="${bx + 280}" y1="562" y2="562" stroke="#8aa1a7"/><text x="${bx + 10}" y="510" font-size="13" font-weight="600">${escape(c.name || 'Unnamed variant')}</text><text x="${bx + 10}" y="533">Transverse section · station ${s.toFixed(2)} m</text><text x="${bx + 10}" y="555">${escape(release.name)} v${release.version} · ${today}</text><text x="${bx + 10}" y="577">${escape(release.author)} · dimensions in metres</text></g>`;
-  svg.innerHTML = `<title>Transverse deck section at station ${s.toFixed(2)} metres</title><g transform="translate(${svgWidth / 2} ${cy}) scale(${k} ${-k})">${drawing}</g><text x="30" y="54" fill="#17374b" font-size="22" font-weight="600">TRANSVERSE DECK SECTION</text><text x="30" y="83" fill="#557279" font-size="15">Station ${s.toFixed(2)} m · Deck ${c.width.toFixed(2)} m · ${c.material === 'box' ? 'Steel box' : c.material === 'steel' ? 'Steel plate' : c.material === 'slab' ? 'Concrete slab' : 'Concrete NEBT'} · Depth ${actualDepth.toFixed(2)} m</text><text x="30" y="575" fill="#557279" font-size="14">Looking toward bridge end · Left / right follow alignment</text>${dims}${titleBlock}`;
+  svg.innerHTML = `<title>Transverse deck section at station ${s.toFixed(2)} metres</title><g transform="translate(${svgWidth / 2} ${cy}) scale(${k} ${-k})">${drawing}</g><text x="30" y="54" fill="#17374b" font-size="22" font-weight="600">TRANSVERSE DECK SECTION</text><text x="30" y="83" fill="#557279" font-size="15">Station ${s.toFixed(2)} m · Deck ${c.width.toFixed(2)} m · ${c.material === 'box' ? 'Steel box' : c.material === 'steel' ? 'Steel plate' : c.material === 'slab' ? 'Concrete slab' : c.material === 'psbox' ? 'Prestressed concrete box' : 'Concrete NEBT'} · Depth ${actualDepth.toFixed(2)} m</text><text x="30" y="575" fill="#557279" font-size="14">Looking toward bridge end · Left / right follow alignment</text>${dims}${titleBlock}`;
 }
 function update(raw, { resetCamera = false, refresh = false } = {}) {
   stopDriving();
@@ -639,19 +711,22 @@ function update(raw, { resetCamera = false, refresh = false } = {}) {
   config = next;
   model = replacement;
   scene.add(model.root);
-  model.deck.visible = !$('reveal').checked;
-  model.haunches.visible = !$('reveal').checked;
+  applyReveal();
   model.setting.visible = view !== 'elevation';
   // The sky dome is the backdrop and the reflected sky; clouds are optional.
   sky.mesh.visible = config.background !== 'white';
-  sky.setClouds(config.skyMode === 'clouds' || config.weather !== 'clear');
+  sky.setClouds(config.skyMode === 'clouds' || config.weather === 'rain' || config.weather === 'snow');
   const glossy = config.waterStyle === 'glossy',
     w = materials.water.userData.water,
-    q = quality[config.renderQuality];
+    q = tier();
   materials.water.roughness = glossy ? 0.035 : 0.07;
   w.rippleStrength.value = glossy ? 0.22 : 0.55;
   w.distortion.value = glossy ? 0.008 : 0.02;
   reflection.setScale(q.reflection);
+  grassUniforms.grassNear.value = q.grassNear;
+  grassUniforms.grassFar.value = q.grassFar;
+  shadowDirty = true;
+  perf.lowSince = null;
   renderer.setPixelRatio(Math.min(devicePixelRatio, q.pixelRatio));
   const sun = scene.userData.lights.sun;
   if (sun.shadow.mapSize.x !== q.shadow) {
@@ -682,7 +757,9 @@ function update(raw, { resetCamera = false, refresh = false } = {}) {
   $('triangles').innerHTML = `${(triangles / 1000).toFixed(1)}<small>k tris</small>`;
   updateHeading();
   $('sceneSubtitle').textContent =
-    `${config.spans.length} ${config.spans.length === 1 ? 'span' : 'spans'} · ${config.material === 'slab' ? 'Solid concrete slab' : config.material === 'concrete' ? 'NEBT ' + config.depth * 1000 : config.material === 'box' ? 'Steel box girders' : 'Steel plate girders'} · ${config.trafficMode === 'cyclists' ? 'cycling · ' : ''}${config.environment}`;
+    `${config.spans.length} ${config.spans.length === 1 ? 'span' : 'spans'} · ${
+      { frame: 'Rigid frame · ', strutted: 'Strutted frame · ', arch: config.archType === 'tied' ? 'Tied ' + config.archMaterial + ' arch · ' : config.archMaterial[0].toUpperCase() + config.archMaterial.slice(1) + ' deck arch · ' }[config.structureSystem] ?? ''
+    }${config.material === 'slab' ? 'Solid concrete slab' : config.material === 'psbox' ? 'Prestressed box girder' : config.material === 'concrete' ? 'NEBT ' + config.depth * 1000 : config.material === 'box' ? 'Steel box girders' : 'Steel plate girders'} · ${config.trafficMode === 'cyclists' ? 'cycling · ' : ''}${config.environment}`;
   if (resetCamera) fit(view);
   needsRender = true;
   const updateMs = performance.now() - started;
@@ -691,6 +768,7 @@ function update(raw, { resetCamera = false, refresh = false } = {}) {
   applyTimeOfDay(config.timeOfDay);
   window.bridgeSketch = window.bridgeViewer = {
     getConfig: () => structuredClone(config),
+    frames: () => frameCount,
     update: raw => update(raw, { refresh: true }),
     getStats: () => ({
       triangles,
@@ -700,6 +778,10 @@ function update(raw, { resetCamera = false, refresh = false } = {}) {
       geometries: renderer.info.memory.geometries,
       drawCalls: renderer.info.render.calls,
       renderedTriangles: renderer.info.render.triangles,
+      fps: perf.fps,
+      gpuMs: perf.gpu,
+      quality: effectiveQuality(config.renderQuality),
+      gpu: gpuInfo(),
     }),
     setView: ({ position, target }) => {
       if (fly) {
@@ -716,12 +798,26 @@ function update(raw, { resetCamera = false, refresh = false } = {}) {
     },
   };
 }
+// Reveal structure hides the deck, its haunches and the street lights standing on it.
+function applyReveal() {
+  if (!model) return;
+  shadowDirty = true;
+  const hide = $('reveal').checked && !driving;
+  model.deck.visible = model.haunches.visible = !hide;
+  if (model.lighting) model.lighting.group.visible = !hide;
+}
 function updateHeading() {
   $('sceneTitle').textContent =
     config.name ||
     (config.trafficMode === 'cyclists'
       ? 'Pedestrian bridge'
-      : config.curved
+      : config.structureSystem === 'arch'
+        ? 'Arch bridge'
+        : config.structureSystem === 'frame'
+          ? 'Rigid frame bridge'
+          : config.structureSystem === 'strutted'
+            ? 'Strutted frame bridge'
+            : config.curved
         ? 'Curved viaduct'
         : config.spans.every(s => s.obstacle === 'water')
           ? 'River crossing'
@@ -741,6 +837,7 @@ function fit(mode = 'perspective') {
     return;
   }
   model.setting.visible = mode !== 'elevation';
+  shadowDirty = true;
   view = mode;
   camera = mode === 'perspective' ? perspectiveCamera : orthoCamera;
   controls.object = camera;
@@ -825,8 +922,7 @@ function stopDriving(restore = true) {
   perspectiveCamera.updateProjectionMatrix();
   const traffic = model.setting.children.find(o => o.name === 'Traffic');
   if (traffic) traffic.visible = true;
-  model.deck.visible = !$('reveal').checked;
-  model.haunches.visible = !$('reveal').checked;
+  applyReveal();
   $('drive').textContent = 'Drive';
   $('drive').setAttribute('aria-pressed', 'false');
   $('drive-status').hidden = true;
@@ -850,7 +946,7 @@ function startDriving() {
   driving = { saved, route, station: -route.reach };
   const traffic = model.setting.children.find(o => o.name === 'Traffic');
   if (traffic) traffic.visible = false;
-  model.deck.visible = true;
+  applyReveal();
   $('drive').textContent = 'Stop';
   $('drive').setAttribute('aria-pressed', 'true');
   $('drive-status').hidden = false;
@@ -890,7 +986,7 @@ function download(blob, name) {
 function renderReflection() {
   const w = materials.water.userData.water;
   w.reflectionStrength.value = 0;
-  if (!model.waters.length || !model.setting.visible || quality[config.renderQuality].reflection <= 0) return;
+  if (!model.waters.length || !model.setting.visible || tier().reflection <= 0) return;
   const start = performance.now(),
     hidden = [
       ...model.waters,
@@ -914,6 +1010,15 @@ async function boot() {
   renderer.toneMappingExposure = 1.12;
   // Draw calls and triangles are counted for the whole frame: shadow, reflection and main passes.
   renderer.info.autoReset = false;
+  renderer.shadowMap.autoUpdate = false;
+  {
+    const gl = renderer.getContext(),
+      info = gl.getExtension('WEBGL_debug_renderer_info');
+    setGpuName(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    perf.ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+  }
+  for (const type of ['pointerdown', 'wheel', 'keydown', 'touchstart'])
+    renderer.domElement.addEventListener(type, () => (lastInteraction = performance.now()), { passive: true });
   $('canvasHost').append(renderer.domElement);
   renderer.domElement.setAttribute('aria-label', '3D bridge model. Use the view buttons for fixed camera views.');
   scene = new T.Scene();
@@ -968,7 +1073,19 @@ async function boot() {
   intro?.progress(0.35, 'Growing the landscape\u2026');
   await new Promise(requestAnimationFrame);
   update(config, { refresh: true, resetCamera: true });
-  intro?.progress(0.8, 'Lighting the scene\u2026');
+  intro?.progress(0.62, 'Lighting the scene\u2026');
+  await new Promise(requestAnimationFrame);
+  // Capture the sky lighting and compile every shader before the first frame (in parallel where the driver
+  // supports it), so the launch sequence does not stall on a long first render.
+  scene.environment = sky.environment(renderer, config.skyMode === 'clouds');
+  envDirty = false;
+  intro?.progress(0.78, 'Compiling shaders\u2026');
+  try {
+    await renderer.compileAsync(scene, camera);
+  } catch (e) {
+    console.warn(e);
+  }
+  bootAt = performance.now();
   if (!location.hash) {
     $('preset').value = presets[0].id;
     if (!config.name) $('sceneTitle').textContent = presets[0].label;
@@ -1026,10 +1143,12 @@ async function boot() {
       flowTime += dt;
       materials.water.userData.flowTime.value = flowTime;
     }
-    const cloudy = sky.mesh.visible && (config.skyMode === 'clouds' || config.weather !== 'clear');
+    const cloudy = sky.mesh.visible && (config.skyMode === 'clouds' || config.weather === 'rain' || config.weather === 'snow');
     if (weather.active) weather.animate(dt, camera);
     if (cloudy) skyTime += dt;
     sky.animate(skyTime, camera);
+    // Moving cloud shadows drift with the sky (materials.mjs); they follow the sun, not the shadow map.
+    cloudShadow.time.value = skyTime;
     // Wind only moves the meadow while the scene is already animating, so a still view costs no frames.
     const animated = flowing || moving || controls.autoRotate || cloudy || weather.active;
     if (animated) grassUniforms.grassTime.value += dt;
@@ -1039,14 +1158,34 @@ async function boot() {
       envAt = time;
       needsRender = true;
     }
-    if (needsRender || animated) {
-      const start = performance.now();
+    // Tree levels of detail follow the camera (re-sorted after 2 m of travel); a swap refreshes the shadows at 2 Hz.
+    if (model.setting.userData.treeLod?.(camera.position)) shadowSoft = true;
+    const key = camera.matrixWorld.elements.map(v => v.toFixed(3)).join(),
+      cameraMoved = key !== cameraKey;
+    cameraKey = key;
+    const interactive = needsRender || fly || driving || controls.autoRotate || cameraMoved || time - lastInteraction < 1500;
+    // Ambient-only animation is capped at 30 fps.
+    const due = interactive || time - lastFrameAt >= 1000 / 30 - 2;
+    if ((needsRender || animated) && due) {
+      if (moving && time - shadowAt > 90) shadowDirty = true;
+      if (shadowSoft && time - shadowAt > 500) shadowDirty = true;
+      if (shadowDirty) {
+        renderer.shadowMap.needsUpdate = true;
+        shadowDirty = shadowSoft = false;
+        shadowAt = time;
+      }
+      const start = performance.now(),
+        timing = $('perf-hud').hidden ? null : beginGpuTimer();
       renderer.info.reset();
-      renderReflection();
+      if (cameraMoved || frameCount % 2 === 0 || !reflection.texture) renderReflection();
       renderer.render(scene, camera);
+      timing?.end();
       frameMs = performance.now() - start;
       needsRender = false;
+      lastFrameAt = time;
+      frameCount++;
     }
+    trackPerformance(time, animated || fly);
   });
   registerTools();
   // Launch sequence: leave the intro once the first frame is on screen, then settle the camera on the bridge.
@@ -1055,6 +1194,63 @@ async function boot() {
     intro.exited.then(() => {
       if (!pendingCamera && view === 'perspective' && !matchMedia('(prefers-reduced-motion: reduce)').matches) startFly();
     });
+  }
+}
+// GPU time of one frame (EXT_disjoint_timer_query_webgl2), read back a few frames later without stalling.
+function beginGpuTimer() {
+  if (!perf.ext || perf.query) return null;
+  const gl = renderer.getContext(),
+    query = gl.createQuery();
+  gl.beginQuery(perf.ext.TIME_ELAPSED_EXT, query);
+  return {
+    end() {
+      gl.endQuery(perf.ext.TIME_ELAPSED_EXT);
+      perf.query = query;
+    },
+  };
+}
+function readGpuTimer() {
+  if (!perf.query) return;
+  const gl = renderer.getContext();
+  if (!gl.getQueryParameter(perf.query, gl.QUERY_RESULT_AVAILABLE)) return;
+  if (!gl.getParameter(perf.ext.GPU_DISJOINT_EXT)) perf.gpu = gl.getQueryParameter(perf.query, gl.QUERY_RESULT) / 1e6;
+  gl.deleteQuery(perf.query);
+  perf.query = null;
+}
+// Loop rate while the scene animates: drives the Stats overlay and lets Auto step the quality down.
+function trackPerformance(time, animating) {
+  readGpuTimer();
+  if (!animating) {
+    if (time - perf.since > 1000 && !$('perf-hud').hidden)
+      $('perf-hud').textContent = `Still view · last frame CPU ${frameMs.toFixed(1)} ms · ${renderer.info.render.calls} calls`;
+    if (time - perf.since > 1000) perf.since = time;
+    perf.frames = 0;
+    perf.lowSince = null;
+    return;
+  }
+  perf.frames++;
+  if (time - perf.since < 1000) return;
+  perf.fps = (perf.frames * 1000) / (time - perf.since);
+  perf.cpu = frameMs;
+  perf.since = time;
+  perf.frames = 0;
+  if (!$('perf-hud').hidden) {
+    const q = effectiveQuality(config.renderQuality);
+    $('perf-hud').textContent =
+      `${Math.round(perf.fps)} fps · CPU ${perf.cpu.toFixed(1)} ms · GPU ${perf.gpu === null ? (perf.ext ? '…' : 'n/a') : perf.gpu.toFixed(1) + ' ms'}` +
+      ` · ${renderer.info.render.calls} calls · ${(renderer.info.render.triangles / 1e6).toFixed(2)} M tris · ` +
+      `${q[0].toUpperCase() + q.slice(1)}${config.renderQuality === 'auto' ? ' (auto)' : ''}`;
+  }
+  // Auto: below 24 fps for 4 s in a row (after the first 6 s) → one tier down, rebuilt once.
+  if (config.renderQuality !== 'auto' || time - bootAt < 6000 || fly) return;
+  if (perf.fps >= 24) perf.lowSince = null;
+  else if (perf.lowSince === null) perf.lowSince = time;
+  else if (time - perf.lowSince > 4000) {
+    const next = stepDownAuto(effectiveQuality('auto'));
+    perf.lowSince = null;
+    if (!next) return;
+    update(config, { refresh: true });
+    notify(`Auto quality: ${Math.round(perf.fps)} fps measured, switched to ${next[0].toUpperCase() + next.slice(1)}.`);
   }
 }
 // Camera fly-in after the intro: from a high, wide, rotated view down to the fitted view (1.8 s, ease-out).
@@ -1144,6 +1340,26 @@ form.addEventListener('change', e => {
       if (e.target.name === 'bentThickness' && config.bentEndThickness === config.bentThickness)
         raw.bentEndThickness = raw.bentThickness;
       if (e.target.name === 'material' && raw.material === 'box') raw.girders = raw.width < 7 ? 1 : 2;
+      // Concrete box girders and frames: start from a sensible depth (about span / 22, deeper at the supports).
+      const longest = Math.max(...raw.spans.map(span => span.length));
+      if (
+        (e.target.name === 'material' && raw.material === 'psbox') ||
+        (e.target.name === 'structureSystem' &&
+          ['frame', 'strutted'].includes(raw.structureSystem) &&
+          !['slab', 'psbox'].includes(raw.material))
+      ) {
+        raw.material = 'psbox';
+        raw.depth = Math.max(1.4, Math.min(4.5, Number((longest / 24).toFixed(2))));
+        raw.pierDepth = Math.max(raw.pierDepth, Number((raw.depth * 1.7).toFixed(2)));
+        raw.width = Math.max(raw.width, 7);
+      }
+      if (e.target.name === 'structureSystem' && raw.structureSystem === 'strutted') raw.variableDepth = true;
+      // Leaving the concrete box: back to a regular girder layout.
+      if (e.target.name === 'material' && config.material === 'psbox' && ['concrete', 'steel'].includes(raw.material)) {
+        raw.overhang = 1.2;
+        raw.girders = Math.max(3, Math.round((raw.width - 2.4) / (raw.material === 'concrete' ? 2.6 : 2.8)) + 1);
+        raw.depth = raw.material === 'concrete' ? 1.4 : Math.min(raw.depth, 2.4);
+      }
       if (
         e.target.name === 'material' &&
         raw.material === 'steel' &&
@@ -1185,11 +1401,13 @@ document.querySelectorAll('[data-view]').forEach(b =>
   }),
 );
 $('fit').onclick = () => fit(view);
+$('stats').onchange = () => {
+  $('perf-hud').hidden = !$('stats').checked;
+  $('perf-hud').textContent = 'Measuring…';
+  needsRender = true;
+};
 $('reveal').onchange = () => {
-  if (model) {
-    model.deck.visible = !$('reveal').checked;
-    model.haunches.visible = !$('reveal').checked;
-  }
+  applyReveal();
   needsRender = true;
 };
 $('reset').onclick = () => selectPreset(presets[0].id);
