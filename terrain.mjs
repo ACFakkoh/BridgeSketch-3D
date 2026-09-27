@@ -1,0 +1,896 @@
+// BridgeSketch 3D · Site: crossings, terrain, approach fills and slopes, river, vegetation and buildings.
+import * as T from 'three';
+import { makeTrain, kenneyGeometry, kenneySize, buildingStyles } from './kenney-scene.mjs';
+import { frame, profile, totalLength, stations, supportStation, waterGroups } from './geometry.mjs';
+import { beam, box, seeded, soffitAt } from './sections.mjs';
+import { roadsideGuardrail } from './railings.mjs';
+import { positionVehicle, vehicle } from './traffic.mjs';
+import { tuftGeometry, flowerGeometry, scatterMeadow, grassBudget } from './grass.mjs';
+import { addTrees } from './trees.mjs';
+import { RAIL_BED } from './geometry.mjs';
+
+export function crossing(c, s, angle, width, elevation, type) {
+  const f = frame(c, s),
+    a = (angle * Math.PI) / 180,
+    dx = f.tx * Math.cos(a) + f.nx * Math.sin(a),
+    dz = f.tz * Math.cos(a) + f.nz * Math.sin(a);
+  return { x: f.x, z: f.z, dx, dz, nx: -dz, nz: dx, width, elevation, type, yaw: -Math.atan2(dz, dx) };
+}
+
+export function coordinates(o, x, z) {
+  const dx = x - o.x,
+    dz = z - o.z;
+  return { along: dx * o.dx + dz * o.dz, across: dx * o.nx + dz * o.nz };
+}
+
+export function world(o, along, across, y) {
+  return [o.x + o.dx * along + o.nx * across, y, o.z + o.dz * along + o.nz * across];
+}
+
+export function riverWiggle(t) {
+  return Math.sin(t * 0.045) * 2.4 + Math.sin(t * 0.1) * 0.7;
+}
+
+export function obstacleTour(c) {
+  const ss = stations(c),
+    middle = totalLength(c) / 2;
+  const index = c.spans.reduce(
+    (best, span, i) =>
+      Math.abs((ss[i] + ss[i + 1]) / 2 - middle) < Math.abs((ss[best] + ss[best + 1]) / 2 - middle) ? i : best,
+    0,
+  );
+  const span = c.spans[index],
+    station = (ss[index] + ss[index + 1]) / 2,
+    bridge = frame(c, station);
+  let obstacle = crossing(c, station, span.angle, span.width, span.elevation, span.obstacle);
+  if (span.obstacle === 'water') {
+    const g = waterGroups(c).find(g => g.startIndex <= index && g.endIndex >= index),
+      first = c.spans[g.startIndex],
+      last = c.spans[g.endIndex];
+    const start = g.start + Math.max(1, (first.length - first.width) / 2),
+      end = g.end - Math.max(1, (last.length - last.width) / 2);
+    const width =
+      g.startIndex === g.endIndex
+        ? Math.min(first.width, first.length - 2)
+        : (end - start) * Math.sin((g.angle * Math.PI) / 180);
+    obstacle = crossing(c, (start + end) / 2, g.angle, width, g.elevation, 'water');
+  }
+  const atBridge = coordinates(obstacle, bridge.x, bridge.z),
+    water = span.obstacle === 'water';
+  const across = water
+    ? T.MathUtils.clamp(
+        atBridge.across - riverWiggle(atBridge.along),
+        -obstacle.width / 2 + 1.3,
+        obstacle.width / 2 - 1.3,
+      )
+    : span.obstacle === 'road'
+      ? obstacle.width / 4
+      : obstacle.width >= 7
+        ? 1.8
+        : 0;
+  const underside = soffitAt(c, index, station),
+    eye = Math.max(
+      0.12,
+      Math.min(water ? 1.3 : span.obstacle === 'rail' ? 2.2 : 1.65, (underside - span.elevation) * 0.4),
+    );
+  const reach = Math.max(
+    32,
+    c.width / Math.sin((span.angle * Math.PI) / 180) + 16,
+    (profile(c, station) - span.elevation) * 1.7,
+  );
+  return {
+    index,
+    type: span.obstacle,
+    reach,
+    pose(distance) {
+      const along = atBridge.along + distance;
+      return {
+        position: world(obstacle, along, across + (water ? riverWiggle(along) : 0), span.elevation + eye),
+        target: [bridge.x, underside - 0.1, bridge.z],
+      };
+    },
+  };
+}
+
+export function terrainSampler(c) {
+  const ss = stations(c),
+    obstacles = c.spans.flatMap((s, i) =>
+      s.obstacle === 'water' ? [] : [crossing(c, (ss[i] + ss[i + 1]) / 2, s.angle, s.width, s.elevation, s.obstacle)],
+    );
+  for (const g of waterGroups(c)) {
+    const first = c.spans[g.startIndex],
+      last = c.spans[g.endIndex],
+      start = g.start + Math.max(1, (first.length - first.width) / 2),
+      end = g.end - Math.max(1, (last.length - last.width) / 2);
+    obstacles.push(
+      crossing(
+        c,
+        (start + end) / 2,
+        g.angle,
+        g.startIndex === g.endIndex
+          ? Math.min(first.width, first.length - 2)
+          : (end - start) * Math.sin((g.angle * Math.PI) / 180),
+        g.elevation,
+        'water',
+      ),
+    );
+  }
+  return (x, z) => {
+    let y = 0.22 + 0.25 * Math.sin(x * 0.053) * Math.cos(z * 0.072);
+    for (const o of obstacles) {
+      const p = coordinates(o, x, z),
+        distance = Math.abs(p.across - (o.type === 'water' ? riverWiggle(p.along) : 0)),
+        blend = T.MathUtils.clamp((o.width / 2 + 3 - distance) / 3, 0, 1);
+      // Banks rise at least 0.2 m above the water so the extended river surface meets them in a natural shoreline.
+      if (o.type === 'water') {
+        const lift = T.MathUtils.clamp((o.width / 2 + 7 - distance) / 4, 0, 1);
+        y += (Math.max(y, o.elevation + 0.2) - y) * lift;
+      }
+      y = y * (1 - blend) + (o.elevation - (o.type === 'water' ? 0.65 : 0.12)) * blend;
+    }
+    return y;
+  };
+}
+
+// Front spill slope: 2H:1V from the abutment face (0.9 m ahead of its support
+// line) down to the ground. If the crossing leaves too little room, the toe
+// stops short of it and the slope starts lower on the wall, keeping 2H:1V.
+export function frontSlopeFit(c, end) {
+  if (!c.frontSlope) return { reach: 0, top: 0 };
+  const first = end === 0,
+    span = first ? c.spans[0] : c.spans.at(-1),
+    toward = first ? 1 : -1,
+    ground = terrainSampler(c),
+    k = first ? 0 : c.spans.length - 1,
+    side = first ? 0.5 : -0.5,
+    half = c.width / 2;
+  // The slope may start lower on the wall (frontSlopeDrop) to keep clear of the crossing.
+  const seat =
+    Math.min(...[-half, 0, half].map(u => soffitAt(c, k, supportStation(c, end, u) + side, u))) - 0.225 - (c.frontSlopeDrop ?? 0);
+  const room =
+    span.obstacle === 'water'
+      ? span.length * 0.4
+      : Math.max(1.4, (span.length - span.width / Math.sin((span.angle * Math.PI) / 180)) / 2 - 1);
+  const height = d => {
+    const f = frame(c, supportStation(c, end, 0) + toward * d, 0);
+    return ground(f.x, f.z);
+  };
+  const excess = d => seat - Math.max(0, d - 0.9) / 2 - height(d);
+  if (excess(room) > 0) return { reach: room, top: height(room) + (room - 0.9) / 2 };
+  let lo = 0.9,
+    hi = room;
+  if (excess(lo) <= 0) return { reach: 0.9, top: seat };
+  for (let n = 0; n < 30; n++) {
+    const mid = (lo + hi) / 2;
+    if (excess(mid) > 0) lo = mid;
+    else hi = mid;
+  }
+  return { reach: hi, top: seat };
+}
+
+// Shared surfaces drive both the visible fill and scenery exclusion. Every radial
+// generator falls one metre for two metres of horizontal run, to actual terrain.
+export function approachSurfaces(c, extent = 0) {
+  const L = totalLength(c),
+    half = c.width / 2 - 0.55,
+    ground = terrainSampler(c),
+    surfaces = [];
+  surfaces.extent = extent;
+  surfaces.corners = [];
+  surfaces.ranges = [];
+  const apex = (station, u) => {
+    const s = supportStation(c, station, u),
+      f = frame(c, s, u);
+    return { f, p: [f.x, profile(c, s) - 0.17, f.z] };
+  };
+  const toe = (p, dx, dz) => {
+    let lo = 0,
+      hi = Math.max(1, 2 * (p[1] - Math.min(-6, ...c.spans.map(s => s.elevation - 1))) + 4);
+    for (let i = 0; i < 28; i++) {
+      const r = (lo + hi) / 2;
+      if (p[1] - r / 2 > ground(p[0] + dx * r, p[2] + dz * r)) lo = r;
+      else hi = r;
+    }
+    return [p[0] + dx * hi, p[1] - hi / 2, p[2] + dz * hi];
+  };
+  for (const [end, toward] of [
+    [0, 1],
+    [L, -1],
+  ]) {
+    const f = frame(c, end),
+      k = Math.tan((c.skew * Math.PI) / 180);
+    const intrusion = p => toward * ((p[0] - f.x) * (f.tx - k * f.nx) + (p[2] - f.z) * (f.tz - k * f.nz));
+    const corners = [],
+      frontReach = frontSlopeFit(c, end).reach;
+    for (const side of [-1, 1]) {
+      const cone = setback => {
+        const station = end - toward * setback,
+          { p, f } = apex(station, half * side),
+          ring = [];
+        for (let i = 0; i <= 24; i++) {
+          const angle = (i * Math.PI) / 48;
+          ring.push(
+            toe(
+              p,
+              side * f.nx * Math.cos(angle) + toward * f.tx * Math.sin(angle),
+              side * f.nz * Math.cos(angle) + toward * f.tz * Math.sin(angle),
+            ),
+          );
+        }
+        return { end, side, station, p, ring, intrusion: Math.max(...ring.map(intrusion)) };
+      };
+      // Move the crest back, never flatten the 2:1 slope: its foremost toe
+      // lands on the abutment plane, including skew and curved alignment.
+      let lo = 0,
+        hi = 8;
+      while (cone(hi).intrusion > frontReach && hi < 512) hi *= 2;
+      for (let i = 0; i < 24; i++) {
+        const mid = (lo + hi) / 2;
+        if (cone(mid).intrusion > frontReach) lo = mid;
+        else hi = mid;
+      }
+      const corner = cone(hi);
+      corners.push(corner);
+      surfaces.corners.push(corner);
+    }
+    let outer = end - toward * Math.max(c.approach + 18, ...corners.map(p => Math.abs(p.station - end) + 8));
+    if (extent) {
+      const target = end === 0 ? -extent / 2 : extent / 2,
+        at = frame(c, outer);
+      outer += (target - at.x) / Math.max(0.1, at.tx);
+      const edgeX = [-c.width / 2, c.width / 2].map(u => frame(c, supportStation(c, outer, u), u).x);
+      const shortfall = end === 0 ? Math.max(...edgeX) - target : target - Math.min(...edgeX);
+      outer += ((end === 0 ? -1 : 1) * Math.max(0, shortfall + 0.05)) / Math.max(0.1, at.tx);
+    }
+    const a = Math.min(outer, end),
+      b = Math.max(outer, end);
+    surfaces.ranges.push([a, b]);
+    const local = [];
+    for (let s = a; s < b; s += 1) {
+      const t = Math.min(b, s + 1);
+      local.push([apex(s, -half).p, apex(s, half).p, apex(t, half).p, apex(t, -half).p]);
+    }
+    for (const corner of corners) {
+      const side = corner.side,
+        a = Math.min(outer, corner.station),
+        b = Math.max(outer, corner.station);
+      for (let s = a; s < b; s += 1) {
+        const p = apex(s, half * side),
+          q = apex(Math.min(b, s + 1), half * side);
+        local.push([p.p, q.p, toe(q.p, q.f.nx * side, q.f.nz * side), toe(p.p, p.f.nx * side, p.f.nz * side)]);
+      }
+      for (let i = 0; i < 24; i++) {
+        const cone = [corner.p, corner.ring[i], corner.ring[i + 1]];
+        cone.finish = c.approachConeMaterial;
+        local.push(cone);
+      }
+    }
+    // Clip numerical/curve overshoot at the same abutment plane.
+    for (const face of local) {
+      const clipped = [];
+      const limit = face.finish ? frontReach : 0;
+      for (let i = 0; i < face.length; i++) {
+        const p = face[i],
+          q = face[(i + 1) % face.length],
+          dp = intrusion(p) - limit,
+          dq = intrusion(q) - limit;
+        if (dp <= 1e-7) clipped.push(p);
+        if (dp > 1e-7 !== dq > 1e-7) {
+          const t = dp / (dp - dq);
+          clipped.push(p.map((v, j) => v + t * (q[j] - v)));
+        }
+      }
+      let bounded = clipped;
+      if (extent) {
+        const target = end === 0 ? -extent / 2 : extent / 2,
+          next = [];
+        for (let i = 0; i < bounded.length; i++) {
+          const p = bounded[i],
+            q = bounded[(i + 1) % bounded.length],
+            dp = end === 0 ? target - p[0] : p[0] - target,
+            dq = end === 0 ? target - q[0] : q[0] - target;
+          if (dp <= 1e-7) next.push(p);
+          if (dp > 1e-7 !== dq > 1e-7) {
+            const t = dp / (dp - dq);
+            next.push(p.map((v, j) => v + t * (q[j] - v)));
+          }
+        }
+        bounded = next;
+      }
+      if (bounded.length >= 3) {
+        bounded.finish = face.finish ?? 'grass';
+        surfaces.push(bounded);
+      }
+    }
+  }
+  return surfaces;
+}
+
+export function roadFootprints(c, fills = approachSurfaces(c), includeBridge = true) {
+  const L = totalLength(c),
+    polygons = [],
+    half = c.width / 2;
+  for (const [a, b] of includeBridge ? [...fills.ranges, [0, L]] : fills.ranges) {
+    const n = Math.ceil(b - a);
+    for (let i = 0; i < n; i++) {
+      const s = a + ((b - a) * i) / n,
+        t = a + ((b - a) * (i + 1)) / n;
+      const p = [
+        [s, -half],
+        [s, half],
+        [t, half],
+        [t, -half],
+      ].map(([v, u]) => frame(c, supportStation(c, v, u), u));
+      polygons.push({
+        p,
+        minX: Math.min(...p.map(v => v.x)),
+        maxX: Math.max(...p.map(v => v.x)),
+        minZ: Math.min(...p.map(v => v.z)),
+        maxZ: Math.max(...p.map(v => v.z)),
+      });
+    }
+  }
+  for (const points of fills) {
+    const p = points.map(([x, y, z]) => ({ x, z }));
+    polygons.push({
+      p,
+      minX: Math.min(...p.map(v => v.x)),
+      maxX: Math.max(...p.map(v => v.x)),
+      minZ: Math.min(...p.map(v => v.z)),
+      maxZ: Math.max(...p.map(v => v.z)),
+    });
+  }
+  return polygons;
+}
+
+export function intersectsRoad(polygons, x, z, radius = 0) {
+  for (const { p, minX, maxX, minZ, maxZ } of polygons) {
+    if (x < minX - radius || x > maxX + radius || z < minZ - radius || z > maxZ + radius) continue;
+    let inside = false;
+    for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
+      const a = p[j],
+        b = p[i],
+        dx = b.x - a.x,
+        dz = b.z - a.z,
+        t = T.MathUtils.clamp(((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz), 0, 1);
+      if (Math.hypot(x - a.x - t * dx, z - a.z - t * dz) <= radius + 0.02) return true;
+      if (a.z > z !== b.z > z && x < ((b.x - a.x) * (z - a.z)) / (b.z - a.z) + a.x) inside = !inside;
+    }
+    if (inside) return true;
+  }
+  return false;
+}
+
+// Reserve the whole strip between adjacent road/rail crossings, including
+// differently angled crossings and curved bridge alignments.
+export function crossingCorridors(c, extent = totalLength(c) + 2 * c.approach + 36, halfZ = c.sceneWidth / 2) {
+  const ss = stations(c),
+    strips = c.spans.flatMap((span, i) => {
+      if (span.obstacle === 'water') return [];
+      const o = crossing(c, (ss[i] + ss[i + 1]) / 2, span.angle, span.width, span.elevation, span.obstacle),
+        reach = Math.hypot(extent, 2 * halfZ);
+      let polygon = [
+        [-reach, -1],
+        [reach, -1],
+        [reach, 1],
+        [-reach, 1],
+      ].map(([s, side]) => {
+        const p = world(o, s, side * (o.width / 2 + 2), 0);
+        return { x: p[0], z: p[2] };
+      });
+      for (const [axis, limit, sign] of [
+        ['x', extent / 2, 1],
+        ['x', -extent / 2, -1],
+        ['z', halfZ, 1],
+        ['z', -halfZ, -1],
+      ]) {
+        const out = [];
+        for (let j = 0; j < polygon.length; j++) {
+          const a = polygon[j],
+            b = polygon[(j + 1) % polygon.length],
+            da = sign * (a[axis] - limit),
+            db = sign * (b[axis] - limit);
+          if (da <= 0) out.push(a);
+          if (da <= 0 !== db <= 0) {
+            const t = da / (da - db);
+            out.push({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t });
+          }
+        }
+        polygon = out;
+      }
+      return [polygon];
+    }),
+    zones = [];
+  for (let i = 0; i < strips.length - 1; i++) {
+    const points = [...strips[i], ...strips[i + 1]].sort((a, b) => a.x - b.x || a.z - b.z),
+      cross = (a, b, c) => (b.x - a.x) * (c.z - a.z) - (b.z - a.z) * (c.x - a.x),
+      lower = [],
+      upper = [];
+    for (const p of points) {
+      while (lower.length > 1 && cross(lower.at(-2), lower.at(-1), p) <= 0) lower.pop();
+      lower.push(p);
+    }
+    for (const p of [...points].reverse()) {
+      while (upper.length > 1 && cross(upper.at(-2), upper.at(-1), p) <= 0) upper.pop();
+      upper.push(p);
+    }
+    const p = [...lower.slice(0, -1), ...upper.slice(0, -1)];
+    if (p.length < 3) continue;
+    zones.push({
+      p,
+      minX: Math.min(...p.map(v => v.x)),
+      maxX: Math.max(...p.map(v => v.x)),
+      minZ: Math.min(...p.map(v => v.z)),
+      maxZ: Math.max(...p.map(v => v.z)),
+    });
+  }
+  return zones;
+}
+
+export function addEnvironment(c, m, parent, fills) {
+  const L = totalLength(c),
+    ss = stations(c),
+    points = fills.flat(),
+    extent = fills.extent || Math.max(L + 2 * c.approach + 36, ...points.map(p => 2 * Math.abs(p[0]) + 8)),
+    halfZ = Math.max(c.sceneWidth / 2, ...points.map(p => Math.abs(p[2]) + 8)),
+    rng = seeded(c.seed),
+    obstacles = [],
+    waters = [],
+    ground = c.terrainMode === 'snow' ? m.snow : m.grass,
+    riverReach = Math.hypot(extent / 2, halfZ) + 8,
+    riverSteps = Math.ceil(riverReach);
+  for (const finish of ['grass', 'stone', 'concrete']) {
+    const fillPos = [];
+    for (const p of fills.filter(face => face.finish === finish))
+      for (let i = 1; i < p.length - 1; i++) {
+        const a = p[0],
+          b = p[i],
+          d = p[i + 1],
+          up = (b[2] - a[2]) * (d[0] - a[0]) - (b[0] - a[0]) * (d[2] - a[2]);
+        fillPos.push(...a, ...(up >= 0 ? b : d), ...(up >= 0 ? d : b));
+      }
+    if (fillPos.length) {
+      const fillGeometry = new T.BufferGeometry();
+      fillGeometry.setAttribute('position', new T.Float32BufferAttribute(fillPos, 3));
+      const uv = [];
+      for (let i = 0; i < fillPos.length; i += 3) uv.push(fillPos[i] / 2, fillPos[i + 2] / 2);
+      fillGeometry.setAttribute('uv', new T.Float32BufferAttribute(uv, 2));
+      fillGeometry.computeVertexNormals();
+      const fill = new T.Mesh(fillGeometry, finish === 'stone' ? m.stone : finish === 'concrete' ? m.concrete : ground);
+      fill.name = '2H:1V approach ' + finish;
+      fill.receiveShadow = true;
+      fill.castShadow = true;
+      parent.add(fill);
+    }
+  }
+  c.spans.forEach((s, i) => {
+    if (s.obstacle !== 'water')
+      obstacles.push(crossing(c, (ss[i] + ss[i + 1]) / 2, s.angle, s.width, s.elevation, s.obstacle));
+  });
+  const terrainHeight = terrainSampler(c);
+  for (const g of waterGroups(c)) {
+    const first = c.spans[g.startIndex],
+      last = c.spans[g.endIndex];
+    const start = g.start + Math.max(1, (first.length - first.width) / 2),
+      end = g.end - Math.max(1, (last.length - last.width) / 2);
+    const width =
+      g.startIndex === g.endIndex
+        ? Math.min(first.width, first.length - 2)
+        : (end - start) * Math.sin((g.angle * Math.PI) / 180);
+    const o = crossing(c, (start + end) / 2, g.angle, width, g.elevation, 'water');
+    obstacles.push(o);
+    // The surface runs 2.5 m under each bank; the terrain draws the shoreline through the depth test.
+    const pos = [],
+      indices = [],
+      across = 8,
+      reach = width / 2 + 2.5;
+    for (let j = 0; j <= riverSteps; j++)
+      for (let k = 0; k <= across; k++) {
+        const along = -riverReach + (j * 2 * riverReach) / riverSteps;
+        pos.push(...world(o, along, -reach + (2 * reach * k) / across + riverWiggle(along), g.elevation));
+      }
+    for (let j = 0; j < riverSteps; j++)
+      for (let k = 0; k < across; k++) {
+        const i0 = j * (across + 1) + k,
+          i1 = i0 + across + 1;
+        indices.push(i0, i0 + 1, i1, i0 + 1, i1 + 1, i1);
+      }
+    const clipped = [];
+    // Clip the river to the terrain boundary so no floating surface extends beyond the landscape.
+    for (let i = 0; i < indices.length; i += 3) {
+      let polygon = indices.slice(i, i + 3).map(k => pos.slice(k * 3, k * 3 + 3));
+      for (const [axis, limit, sign] of [
+        [0, extent / 2, 1],
+        [0, -extent / 2, -1],
+        [2, halfZ, 1],
+        [2, -halfZ, -1],
+      ]) {
+        const output = [];
+        for (let j = 0; j < polygon.length; j++) {
+          const a = polygon[j],
+            b = polygon[(j + 1) % polygon.length],
+            insideA = sign * (a[axis] - limit) <= 0,
+            insideB = sign * (b[axis] - limit) <= 0;
+          if (insideA) output.push(a);
+          if (insideA !== insideB) {
+            const t = (limit - a[axis]) / (b[axis] - a[axis]);
+            output.push(a.map((v, k) => v + t * (b[k] - v)));
+          }
+        }
+        polygon = output;
+      }
+      for (let j = 1; j < polygon.length - 1; j++) clipped.push(...polygon[0], ...polygon[j], ...polygon[j + 1]);
+    }
+    const geo = new T.BufferGeometry();
+    geo.setAttribute('position', new T.Float32BufferAttribute(clipped, 3));
+    const riverUV = [],
+      shore = [],
+      depth = [],
+      flow = [];
+    for (let k = 0; k < clipped.length; k += 3) {
+      const p = coordinates(o, clipped[k], clipped[k + 2]);
+      riverUV.push(p.along, p.across);
+      shore.push((p.across - riverWiggle(p.along)) / (width / 2));
+      depth.push(Math.max(0, g.elevation - terrainHeight(clipped[k], clipped[k + 2])));
+      flow.push(o.dx, o.dz);
+    }
+    geo.setAttribute('uv', new T.Float32BufferAttribute(riverUV, 2));
+    // Signed position across the river (-1 left bank, +1 right bank; beyond ±1 under the banks).
+    geo.setAttribute('shore', new T.Float32BufferAttribute(shore, 1));
+    // Water depth above the analytic terrain drives the shallow tint and the shoreline foam.
+    geo.setAttribute('waterDepth', new T.Float32BufferAttribute(depth, 1));
+    geo.setAttribute('flowDirection', new T.Float32BufferAttribute(flow, 2));
+    geo.computeVertexNormals();
+    const river = new T.Mesh(geo, m.water);
+    river.name = 'Flowing river';
+    river.receiveShadow = true;
+    river.userData.level = g.elevation;
+    parent.add(river);
+    waters.push(river);
+  }
+  const terrainGeo = new T.PlaneGeometry(
+    extent,
+    halfZ * 2,
+    Math.min(240, Math.ceil(extent / 1.2)),
+    Math.ceil((halfZ * 2) / 1.2),
+  );
+  terrainGeo.rotateX(-Math.PI / 2);
+  const terrainPos = terrainGeo.attributes.position;
+  for (let i = 0; i < terrainPos.count; i++) terrainPos.setY(i, terrainHeight(terrainPos.getX(i), terrainPos.getZ(i)));
+  terrainGeo.computeVertexNormals();
+  const terrain = new T.Mesh(terrainGeo, ground);
+  terrain.name = 'Terrain surface';
+  terrain.receiveShadow = true;
+  parent.add(terrain);
+  // Border skirt follows the terrain edge, keeping the diorama watertight visually.
+  const base = Math.min(-1.5, ...c.spans.map(s => s.elevation - 1.5));
+  // One continuous soil strip per edge, following the terrain line (no stretched grass texture).
+  m.soil.userData.snow.value = c.terrainMode === 'snow' ? 1 : 0;
+  const skirt = (from, to, outward) => {
+    const n = Math.max(2, Math.ceil(Math.hypot(to[0] - from[0], to[1] - from[1]) / 1.2)),
+      position = [],
+      depth = [];
+    for (let i = 0; i < n; i++)
+      for (const t of [i / n, (i + 1) / n]) {
+        const x = from[0] + (to[0] - from[0]) * t,
+          z = from[1] + (to[1] - from[1]) * t,
+          y = terrainHeight(x, z);
+        position.push(x, y, z, x, base, z);
+        depth.push(0, y - base);
+      }
+    const index = [];
+    for (let i = 0; i < n; i++) {
+      const k = i * 4;
+      index.push(...(outward ? [k, k + 1, k + 2, k + 2, k + 1, k + 3] : [k, k + 2, k + 1, k + 2, k + 3, k + 1]));
+    }
+    const g = new T.BufferGeometry();
+    g.setAttribute('position', new T.Float32BufferAttribute(position, 3));
+    g.setAttribute('soilDepth', new T.Float32BufferAttribute(depth, 1));
+    g.setIndex(index);
+    g.computeVertexNormals();
+    const mesh = new T.Mesh(g, m.soil);
+    mesh.name = 'Terrain edge soil';
+    mesh.receiveShadow = true;
+    parent.add(mesh);
+  };
+  skirt([-extent / 2, halfZ], [extent / 2, halfZ], true);
+  skirt([extent / 2, -halfZ], [-extent / 2, -halfZ], true);
+  skirt([extent / 2, halfZ], [extent / 2, -halfZ], true);
+  skirt([-extent / 2, -halfZ], [-extent / 2, halfZ], true);
+  for (const [a, b] of fills.ranges) {
+    const start = a < 0,
+      target = start ? -extent / 2 : extent / 2,
+      points = fills.flatMap(face => face.filter(p => Math.abs(p[0] - target) < 0.002));
+    for (const u of [-c.width / 2, c.width / 2]) {
+      let station = start ? a : b;
+      for (let k = 0; k < 5; k++) {
+        const actual = supportStation(c, station, u),
+          x = frame(c, actual, u).x,
+          delta = 0.01,
+          derivative = (frame(c, supportStation(c, station + delta, u), u).x - x) / delta;
+        station += (target - x) / Math.max(0.1, derivative);
+      }
+      const actual = supportStation(c, station, u),
+        p = frame(c, actual, u);
+      points.push([target, profile(c, actual) - 0.17, p.z]);
+    }
+    points.sort((p, q) => p[2] - q[2]);
+    const top = [];
+    for (const p of points) {
+      if (top.length && Math.abs(p[2] - top.at(-1)[2]) < 0.002) {
+        if (p[1] > top.at(-1)[1]) top[top.length - 1] = p;
+      } else top.push(p);
+    }
+    const section = top.map(p => [
+      [target, p[1], p[2]],
+      [target, base, p[2]],
+    ]);
+    const vertices = [],
+      uv = [],
+      depth = [];
+    for (let j = 0; j < section.length - 1; j++) {
+      const [p, q] = section[j],
+        [r, t] = section[j + 1],
+        face = start ? [p, t, r, p, q, t] : [p, r, t, p, t, q],
+        tops = start ? [p, r, r, p, p, r] : [p, r, r, p, r, p];
+      for (let k = 0; k < face.length; k++) {
+        vertices.push(...face[k]);
+        uv.push(face[k][2] / 2, face[k][1] / 2);
+        depth.push(tops[k][1] - face[k][1]);
+      }
+    }
+    const geometry = new T.BufferGeometry();
+    geometry.setAttribute('position', new T.Float32BufferAttribute(vertices, 3));
+    geometry.setAttribute('uv', new T.Float32BufferAttribute(uv, 2));
+    geometry.setAttribute('soilDepth', new T.Float32BufferAttribute(depth, 1));
+    geometry.computeVertexNormals();
+    const cap = new T.Mesh(geometry, m.soil);
+    cap.name = 'Grass-covered approach cut';
+    cap.receiveShadow = true;
+    parent.add(cap);
+  }
+  box(parent, m.earth, 0, base - 0.2, 0, extent, 0.4, halfZ * 2);
+  let railIndex = 0;
+  for (const o of obstacles.filter(o => o.type !== 'water')) {
+    const halfLength = Math.max(
+      1,
+      Math.min(
+        halfZ + 10,
+        (extent / 2 - Math.abs(o.x) - (Math.abs(o.nx) * o.width) / 2) / Math.max(0.001, Math.abs(o.dx)),
+        (halfZ - Math.abs(o.z) - (Math.abs(o.nz) * o.width) / 2) / Math.max(0.001, Math.abs(o.dz)),
+      ),
+    );
+    o.halfLength = halfLength;
+    const basePos = world(o, 0, 0, o.elevation - 0.1);
+    box(parent, o.type === 'road' ? m.asphalt : m.sand, ...basePos, 2 * halfLength, 0.2, o.width, o.yaw);
+    if (o.type === 'road') {
+      for (const side of [-1, 1])
+        box(
+          parent,
+          m.white,
+          ...world(o, 0, side * (o.width / 2 - 0.3), o.elevation + 0.013),
+          2 * halfLength,
+          0.018,
+          0.1,
+          o.yaw,
+        );
+      // Dashed yellow centre line between the two directions: 3 m dashes every 9 m.
+      for (let t = -halfLength; t < halfLength - 0.5; t += 9) {
+        const dash = Math.min(3, halfLength - t);
+        box(parent, m.yellow, ...world(o, t + dash / 2, 0, o.elevation + 0.016), dash, 0.02, 0.1, o.yaw);
+      }
+      roadsideGuardrail(parent, m, c, -halfLength, halfLength, o.width / 2 + 0.35, o);
+      roadsideGuardrail(parent, m, c, -halfLength, halfLength, -o.width / 2 - 0.35, o);
+      if (c.showTraffic && o.width >= 6.4)
+        for (const t of [-halfLength * 0.6, halfLength * 0.6])
+          vehicle(parent, m, c, t, ((t < 0 ? 1 : -1) * o.width) / 4, t < 0 ? 'car' : 'truck', t < 0, o);
+    } else {
+      const tracks = o.width >= 7 ? [-1.8, 1.8] : [0];
+      // Crushed-stone ballast bed, 0.5 m above the ground: 1.5H:1V shoulders, sleepers and rails on top.
+      const bedTop = RAIL_BED,
+        halfTop = Math.abs(tracks[0]) + 1.9,
+        bed = [
+          [-halfTop - 1.5 * bedTop, 0],
+          [-halfTop, bedTop],
+          [halfTop, bedTop],
+          [halfTop + 1.5 * bedTop, 0],
+        ],
+        position = [];
+      for (const [t0, t1] of [[-halfLength, halfLength]])
+        for (let k = 0; k < bed.length - 1; k++) {
+          const [a0, y0] = bed[k],
+            [a1, y1] = bed[k + 1],
+            p = (t, a, y) => world(o, t, a, o.elevation + y);
+          position.push(...p(t0, a0, y0), ...p(t1, a0, y0), ...p(t1, a1, y1), ...p(t0, a0, y0), ...p(t1, a1, y1), ...p(t0, a1, y1));
+        }
+      const bedGeometry = new T.BufferGeometry();
+      bedGeometry.setAttribute('position', new T.Float32BufferAttribute(position, 3));
+      bedGeometry.computeVertexNormals();
+      if (bedGeometry.attributes.normal.getY(0) < 0) {
+        for (let i = 0; i < position.length; i += 9)
+          for (const j of [0, 1, 2]) [position[i + 3 + j], position[i + 6 + j]] = [position[i + 6 + j], position[i + 3 + j]];
+        bedGeometry.setAttribute('position', new T.Float32BufferAttribute(position, 3));
+        bedGeometry.computeVertexNormals();
+      }
+      const ballast = new T.Mesh(bedGeometry, m.ballast);
+      ballast.name = 'Railway ballast';
+      ballast.receiveShadow = ballast.castShadow = true;
+      parent.add(ballast);
+      for (const offset of tracks) {
+        for (let t = -halfLength + 0.2; t < halfLength - 0.2; t += 0.7)
+          box(parent, m.trunk, ...world(o, t, offset, o.elevation + bedTop + 0.06), 0.22, 0.12, 2.5, o.yaw);
+        for (const side of [-0.7175, 0.7175])
+          box(parent, m.dark, ...world(o, 0, offset + side, o.elevation + bedTop + 0.16), 2 * halfLength, 0.16, 0.08, o.yaw);
+      }
+      if (c.showTraffic) {
+        let traffic = parent.children.find(child => child.name === 'Traffic');
+        if (!traffic) {
+          traffic = new T.Group();
+          traffic.name = 'Traffic';
+          parent.add(traffic);
+        }
+        const style = c.trainStyle === 'mixed'
+            ? ['diesel', 'bullet', 'city'][Math.floor(seeded(c.seed * 31 + railIndex * 7919 + 5)() * 3)]
+            : c.trainStyle;
+        const carCount = 4 + Math.floor(seeded(c.seed + railIndex * 1009 + 137)() * 9);
+        const train = makeTrain(style, m.train, carCount),
+          forward = (railIndex + c.seed) % 2 === 0;
+        train.userData.route = {
+          s: (forward ? -0.33 : 0.33) * halfLength,
+          u: tracks.length === 1 ? 0 : forward ? tracks[1] : tracks[0],
+          type: 'train',
+          forward,
+          road: o,
+          halfLength: train.userData.length / 2,
+          halfWidth: train.userData.width / 2,
+          verticalOffset: 0.22 + RAIL_BED,
+          speed: 48,
+          offscreenGap: 40,
+        };
+        positionVehicle(train, c);
+        traffic.add(train);
+      }
+      railIndex++;
+    }
+  }
+  const roadZones = roadFootprints(c, fills),
+    corridorZones = crossingCorridors(c, extent, halfZ);
+  const occupied = (x, z, margin = 2) => {
+    for (const o of obstacles) {
+      const p = coordinates(o, x, z);
+      if (Math.abs(p.across - (o.type === 'water' ? riverWiggle(p.along) : 0)) < o.width / 2 + margin) return true;
+    }
+    return intersectsRoad(roadZones, x, z, margin);
+  };
+  const trees = [];
+  for (let i = 0; i < 2400 && c.environment === 'rural' && trees.length < 220; i++) {
+    const x = (rng() - 0.5) * (extent - 12),
+      z = (rng() - 0.5) * (2 * halfZ - 12),
+      scale = 1.1 + rng() * 1.5,
+      radius = scale * 3.5 + 1;
+    if (!occupied(x, z, radius) && !intersectsRoad(corridorZones, x, z, radius))
+      trees.push({ x, z, y: terrainHeight(x, z), scale, rotation: rng() * Math.PI });
+  }
+  const instanced = (geo, mat, items, transform) => {
+    if (!items.length) {
+      geo.dispose();
+      return;
+    }
+    const mesh = new T.InstancedMesh(geo, mat, items.length),
+      dummy = new T.Object3D();
+    items.forEach((item, i) => {
+      transform(dummy, item);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    });
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    parent.add(mesh);
+    return mesh;
+  };
+  const rocks = [];
+  for (const o of obstacles.filter(o => o.type === 'water'))
+    for (let along = -riverReach; along < riverReach; along += 1.8)
+      for (const side of [-1, 1]) {
+        const p = world(o, along, riverWiggle(along) + side * (o.width / 2 + 1.9 + rng() * 1.3), 0);
+        if (Math.abs(p[0]) < extent / 2 - 1 && Math.abs(p[2]) < halfZ - 1)
+          rocks.push({ x: p[0], z: p[2], y: terrainHeight(p[0], p[2]), s: 0.2 + rng() * 0.5, r: rng() * 6 });
+      }
+  instanced(new T.DodecahedronGeometry(1, 0), c.terrainMode === 'snow' ? m.snow : m.bankRock, rocks, (d, r) => {
+    d.position.set(r.x, r.y, r.z);
+    d.scale.set(r.s, r.s * 0.45, r.s * 0.8);
+    d.rotation.set(0.2, r.r, 0.15);
+  });
+  // EZ-Tree species, instanced (trees.mjs); detail follows the render quality.
+  for (const t of trees) t.hue = (rng() - 0.5) * 0.06;
+  addTrees(parent, m, trees, rng, { quality: c.renderQuality, snow: c.terrainMode === 'snow' });
+  // Budgeted meadow (grass.mjs): denser near the bridge and in clumps, never on the submerged banks.
+  if (c.terrainMode !== 'snow') {
+    const nearWater = (x, z) =>
+      obstacles.some(o => {
+        if (o.type !== 'water') return false;
+        const p = coordinates(o, x, z);
+        return Math.abs(p.across - riverWiggle(p.along)) < o.width / 2 + 2.3;
+      });
+    // Grass continues under the deck; only the supports, approach fills and crossings stay clear.
+    const groundZones = roadFootprints(c, fills, false),
+      supportLines = stations(c).slice(1, -1).flatMap(s => {
+        const points = [];
+        for (let u = -c.width / 2 - 1; u <= c.width / 2 + 1; u += 0.5) points.push(frame(c, supportStation(c, s, u), u));
+        return [points];
+      }),
+      nearSupport = (x, z) => supportLines.some(line => line.some(p => Math.hypot(p.x - x, p.z - z) < 1.6)),
+      clearGround = (x, z, margin) => {
+        for (const o of obstacles) {
+          const p = coordinates(o, x, z);
+          if (Math.abs(p.across - (o.type === 'water' ? riverWiggle(p.along) : 0)) < o.width / 2 + margin) return true;
+        }
+        return intersectsRoad(groundZones, x, z, margin) || nearSupport(x, z);
+      };
+    const meadow = scatterMeadow({
+      extent,
+      halfZ,
+      rng,
+      seed: c.seed,
+      budget: grassBudget[c.renderQuality] ?? grassBudget.balanced,
+      height: terrainHeight,
+      occupied: (x, z, margin) => clearGround(x, z, margin) || nearWater(x, z),
+    });
+    const green = new T.Color(),
+      dry = new T.Color('#e8d59a'),
+      lawn = new T.Color('#b9d98a');
+    const grass = instanced(tuftGeometry(), m.grassBlade, meadow.items, (d, g) => {
+      d.position.set(g.x, g.y, g.z);
+      d.scale.set(g.s, g.s * (c.environment === 'urban' ? 0.55 : 1), g.s);
+      d.rotation.y = g.r;
+    });
+    if (grass) {
+      grass.name = 'Meadow blades';
+      grass.castShadow = false;
+      meadow.items.forEach((g, i) => {
+        green.setRGB(0.8 + rng() * 0.2, 0.86 + rng() * 0.14, 0.72 + rng() * 0.22).lerp(dry, g.dry * 0.45);
+        if (c.environment === 'urban') green.lerp(lawn, 0.35);
+        grass.setColorAt(i, green);
+      });
+    }
+    const palette = ['#f4f1e6', '#f2cf55', '#b9a3dd', '#e98f7c'].map(color => new T.Color(color));
+    const flowers =
+      c.environment === 'urban'
+        ? null
+        : instanced(flowerGeometry(), m.grassBlade, meadow.flowers, (d, f) => {
+            d.position.set(f.x, f.y, f.z);
+            d.scale.setScalar(f.s);
+            d.rotation.y = f.r;
+          });
+    if (flowers) {
+      flowers.name = 'Meadow flowers';
+      flowers.castShadow = false;
+      meadow.flowers.forEach((f, i) => flowers.setColorAt(i, palette[f.kind]));
+    }
+  }
+  if (c.environment === 'urban') {
+    const buildings = Object.fromEntries(buildingStyles.map(name => [name, []]));
+    for (let x = -extent / 2 + 14; x < extent / 2 - 9; x += 13)
+      for (let z = -halfZ + 12; z < halfZ - 7; z += 15) {
+        const name = buildingStyles[Math.floor(rng() * buildingStyles.length)],
+          size = kenneySize(name),
+          scale = 0.85 + rng() * 0.25,
+          radius = (Math.hypot(size[0], size[2]) * scale) / 2 + 1;
+        if (!occupied(x, z, radius) && !intersectsRoad(corridorZones, x, z, radius) && rng() > 0.15)
+          buildings[name].push({ x, z, y: terrainHeight(x, z), scale });
+      }
+    for (const name of buildingStyles) {
+      const mesh = instanced(
+        kenneyGeometry(name),
+        name.startsWith('building-type') ? m.suburban : m.commercial,
+        buildings[name],
+        (d, b) => {
+          d.position.set(b.x, b.y, b.z);
+          d.scale.setScalar(b.scale);
+        },
+      );
+      if (mesh) mesh.name = `Kenney ${name}`;
+    }
+  }
+  return waters;
+}

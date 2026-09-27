@@ -23,3 +23,11 @@ Prompt: Seamless tileable photorealistic PBR base color texture of compacted civ
 ## 4K material set
 
 `steel_4k.webp`, `concrete_4k.webp`, and `asphalt_4k.webp` are 4096 × 4096 WebP diffuse maps generated for the 0.4.0 presentation pass. In 0.4.1 the concrete map was replaced by Poly Haven's rough-concrete PBR maps. The steel and concrete generated maps are retained as historical assets; asphalt remains active.
+
+## riprap_diff.webp · riprap_nor.webp · riprap_rough.webp
+
+Procedural, generated on September 26, 2026 with `tmp/make-riprap-texture.py` (NumPy + Pillow, no external source image). Seamless 1024 px tile representing 2 m: about 80 packed angular stones of 200–300 mm, each a convex set of tilted facets on a warped Voronoi layout, with darker soil-filled voids, baked occlusion, OpenGL normal map and roughness map. Used by the stone finish of approach cones and front-of-abutment slopes.
+
+## water-waves.webp (2026-09-26)
+
+Tileable 512 x 512 river normal map generated procedurally with NumPy (random-phase directional wave spectrum, spectral gradients, seed 11). Original work for BridgeSketch 3D, no third-party source.

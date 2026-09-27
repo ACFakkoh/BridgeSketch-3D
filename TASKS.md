@@ -1,6 +1,86 @@
 # BridgeSketch 3D — suivi des travaux
 
-Mise à jour : 2026-09-25. Source de vérité pour les changements locaux et leur état de publication.
+Mise à jour : 2026-09-27. Source de vérité pour les changements locaux et leur état de publication.
+
+## Correctifs et fonctionnalités — commentaires Notion du 2026-09-27 (local, non publié)
+
+- [x] Options par défaut pour tous les préréglages : nuages dynamiques, rivière miroir calme, qualité High, brume atmosphérique.
+- [x] Brume atmosphérique stylisée selon l'heure (option) : bleutée le jour, pêche à l'heure dorée, bleu nuit; fondue dans l'horizon du ciel.
+- [x] Limites de scène : largeur de terrain 90–600 m, longueur d'approche 5–200 m.
+- [x] Marquage : lignes pointillées 3 m / 6 m entre voies adjacentes (pont et approches), jaune entre sens opposés; ligne centrale jaune pointillée sur les routes franchies.
+- [x] Herbe : Balanced = 45 000 touffes (ancien High), High = 85 000; brins nuancés; herbe continue sous le pont (hors appuis, remblais et obstacles).
+- [x] Couleur des poutres : peinture satinée non métallique, albédo calibré ×0,88; âme ensoleillée à midi proche du code hex.
+- [x] Arbres EZ-Tree (MIT, Daniel Greenheck) : chêne, frêne, tremble instanciés; détail selon la qualité; vent, rétro-éclairage, alpha préservé au loin.
+- [x] Piles : colonnes rondes, carrées ou rectangulaires; espacement des colonnes extrêmes réglable (0 = 64 % du tablier), colonnes intermédiaires équidistantes.
+- [x] Bords de scène : même coupe de sol sur les 4 côtés et aux coupes d'approche.
+- [x] Vue Section : zoom à la molette, déplacement, double-clic pour recadrer; bouton « Save section SVG » retiré.
+- [x] Glissières béton Type 201 (880 mm) et Type 301 (1140 mm) à gauche ou à droite; anciens fichiers « concrete » → 201.
+- [x] Trottoir séparé par une glissière 301 (dessin 2250) : barrière sur la dalle, trottoir à face verticale derrière.
+- [x] Chasse-roue 450 × 280 et bordure de trottoir : face route 35 mm dans 280 mm; trottoir 280 mm, pente 1 % vers la chaussée.
+- [x] Appuis des poutres à âme pleine : diaphragme ou contreventement en K selon le tableau 10.5-1 (h, S), 100 mm sous le haut, 150 mm au-dessus du bas.
+- [x] Pente devant la culée : départ abaissable (« Slope start below seat »).
+- [x] Épaisseur de dalle 200 / 225 / 250 mm (225 par défaut).
+- [x] Trains : mélange aléatoire des trois modèles; choix retiré de l'interface.
+- [x] « Pedestrian bridge » : aux approches, rien ou chasse-roue + 20C. Pont routier : rien / prolonger les garde-corps / glissière semi-rigide.
+- [x] Voie ferrée : ballast de pierre concassée 0,5 m (talus 1,5H:1V); dégagement mesuré au-dessus du ballast.
+- [x] Éclairage : lampadaires LED (mâts 10 m, 30 m) ou DEL dans la main courante 20C (3 m, blanc ou jaune), allumage 20 h – 6 h 30, reflets dans l'eau.
+- [x] Météo : pluie légère ou neige légère.
+- [x] Vérifications : `node check.mjs` (nouveaux tests), console du navigateur, export GLB.
+- [x] Ajout du 27/09 (suite) : lampadaires d'un côté, de l'autre ou des deux côtés (quinconce si deux côtés); finition distincte des poutres de rive (catalogue AMS ou couleur libre), aussi dans la coupe; animation de lancement < 5 s (élévation « blueprint » qui se dessine, logo, barre de progression réelle, puis levée du rideau et arrivée de la caméra), passable par clic ou touche, version courte si « réduire les animations ».
+- [ ] À valider par Anthony : FPS sur GPU réel en High (≈ 2,4 M triangles avec herbe et arbres), puis version, archives et push GitHub.
+
+## R&D rendu — eau, herbe, ciel (2026-09-26, local, non publié)
+
+Reprise de la R&D 0.5.0 (Notion « BridgeSketch 3D — R&D 0.5.0 et vérification ») avec intégration des techniques de `three-stylized` et `threejs-water`, sans leurs dépendances ni leurs passes multiples.
+
+- [x] Rivière (`dist/water.mjs`) : une réflexion planaire à demi-résolution (plan de coupe oblique, herbe et eau exclues de la passe), Fresnel PBR, carte de vagues tuilable générée (`textures/water-waves.webp`, 3 échelles défilant dans le sens du courant), teinte selon la profondeur réelle, écume de rive, reflets de soleil. « Calm mirror river » = variante plus calme.
+- [x] Rive naturelle : la surface d'eau passe 2,5 m sous les berges, relevées d'au moins 0,20 m près de l'eau; la ligne de rive est dessinée par le terrain. Blocs déplacés sur la nouvelle rive.
+- [x] Herbe (`dist/grass.mjs`) : touffes de 7 brins courbes (2 triangles/brin), vent GPU cohérent, dégradé pied→pointe, normales redressées, rétro-éclairage au coucher du soleil; densité budgétée (20 000 touffes en Balanced), plus dense près du pont et en taches; fleurs des champs discrètes (hors urbain).
+- [x] Ciel (`dist/sky.mjs`) : dégradé jour/coucher, halo solaire, nuages éclairés par le soleil; le même shader est capturé en éclairage d'environnement (PMREM) à chaque changement d'heure. Le dôme sert de fond (sauf fond blanc) et de ciel réfléchi.
+- [x] Nouveau réglage « Render quality » : Performance (sans réflexion, ombres 2048), Balanced (défaut), High (réflexion 0,75, herbe dense).
+- [x] Vérifications : `node check.mjs` réussi (max 424 897 triangles contre 462 328 avant), console propre, export GLB réussi (mêmes 2 avertissements GLTFExporter qu'en 0.5.0), captures avant/après `screenshots/avant-apres-rendu-2026-09-26.png`.
+- [x] Mesures (Chromium SwiftShader, image complète ombres + réflexion + principale) : rivière 3 travées 194 appels / 0,89 M triangles en Balanced, 130 appels / 0,55 M en Performance, contre 128 appels / 0,70 M pour 0.5.0 (GitHub). Ce ne sont pas des mesures GPU.
+- [ ] À valider par Anthony sur GPU réel (FPS), puis décider du numéro de version, des archives et du push GitHub.
+
+## Suite 0.5.0 — points 2 à 6 de ClaudeEval (2026-09-26)
+
+- [x] Captures du README régénérées (0.5.0) avec passerelle cyclable et coupe cotée.
+- [x] Coupe transversale : chaînes de cotes (zones du tablier, largeur totale, entraxes, hauteur de structure) et cartouche (variante, version, date, auteur).
+- [x] Rendu : brume atmosphérique selon l'heure, rivière à effet Fresnel (plus de blanc saturé à midi), berges peu profondes et écume, herbe plus humide près de l'eau et plus sèche sur les talus, pelouse urbaine, blocs de berge gris.
+- [x] Refactor : sources formatées (Prettier), `scene.mjs` découpé en six modules, contrôles dans le dépôt (`tests/check.mjs`; `check.mjs` local délègue), `.gitattributes`.
+- [x] Diaphragmes intérieurs de 25 mm dans chaque caisson sur chaque ligne d'appui.
+- [ ] Historique Git unique : à décider (voir ClaudeEval.md, section 3) — le dossier local garde son ancien `.git`; `tmp/github-push-0.5.0` est le clone de publication.
+
+## Correctifs 0.5.0 — commentaires Notion du 2026-09-26 (version conservée : 0.5.0)
+
+Source : « BridgeSketch 3D Commentaires 2026-09-26 » (Travail ATRL / Python projects / Bridge Sketch 3D). Évaluation complète : `ClaudeEval.md`.
+
+- [x] Pas de chasse-roue sous un garde-corps posé sur un trottoir (bord et protection côté circulation); poteaux ancrés dans le trottoir.
+- [x] Cycliste refait (cadre diamant, roues à rayons, cintre, cycliste penché) et animé : roues, pédalier et jambes suivent la distance parcourue.
+- [x] Troisième bleu (AMS 15090) retiré; anciens fichiers convertis en 15065.
+- [x] AMS 16515 gris clair #C7C9C7 ajouté (aspect pont Saint-Jacques), valeur lue sur ams-std-595-color.com.
+- [x] Extrémités des chasse-roues, glissières et de tous les solides balayés fermées en béton (faces d'about orientées vers l'extérieur).
+- [x] Travées jusqu'à 150 m (hauteurs de poutres 5 m / 8 m aux appuis); ombres adaptées à la taille du modèle.
+- [x] Rayon de courbure jusqu'à 30 m (minimum demi-largeur du tablier + 12 m).
+- [x] Blocs d'assise de hauteur constante 150 mm; chevêtres, murs de pile et sièges de culée suivent le dessous des blocs.
+- [x] Nom de variante; nom, date et version dans les noms de fichiers JSON / PNG / SVG / GLB.
+- [x] Gousset fixé à 50 mm et retiré des paramètres.
+- [x] Caisson acier : la semelle inférieure pilote la largeur des caissons, l'espacement et les porte-à-faux (plus de blocage; message avec la largeur maximale si le tablier est trop étroit).
+- [x] Contreventements à 8 m maximum par travée; diaphragmes transversaux profonds (âme + semelles) sur chaque ligne d'appui, culées et piles.
+- [x] Raidisseurs verticaux 14 mm, hauteur locale et biais suivis : faces intérieures aux contreventements, trois par face à 150 mm aux appuis; aucun sur les caissons.
+- [x] Asphalte 65 mm limité à la chaussée; trottoirs, chasse-roues, glissières et terre-pleins posés sur la dalle.
+- [x] Caisson à hauteur variable : semelles supérieures droites et parallèles; âmes 1H:4V en section courante, plus raides dans les goussets d'appui. Vérifié visuellement.
+- [x] Nouvelle texture d'enrochement 200–300 mm (procédurale, 2 m par tuile, diffuse + normale + rugosité).
+- [x] Chanfreins 15 × 15 mm dans la coupe transversale (dalle, trottoirs, chasse-roues, glissières, terre-plein).
+- [x] Chevêtre à épaisseur variable : face d'about fermée et texturée.
+- [x] Talus devant la culée : 2H:1V depuis la face de la culée jusqu'au terrain, même ligne de pied que les cônes d'approche, pour toute largeur d'obstacle et toute hauteur de poutre; si la place manque, le talus démarre plus bas sur le mur.
+
+### Vérification 2026-09-26
+
+- [x] `node check.mjs` : nouveaux contrôles (150 m, R = 30 m, gousset 50 mm, nom, disposition des caissons par la semelle inférieure, blocs 150 mm, nombres de raidisseurs et diaphragmes, absence de raidisseurs sur caissons, talus avant).
+- [x] Test des faces d'about : 0 face inversée (toutes l'étaient dans la version précédente).
+- [x] Captures navigateur (Chromium/SwiftShader) : dessous des poutres, contreventements, diaphragmes, caissons variables, cycliste animé, talus avant en enrochement, coupe transversale, travée de 150 m, rayon de 30 m; console sans erreur.
+- [x] Interface : semelle inférieure 3,55 → 4,20 m acceptée, 8 m refusée avec largeur maximale; enregistrement `BridgeSketch-Option-A-caissons-elargis_2026-09-26_v0.5.0.json`.
 
 ## Correctifs 0.4.3
 
@@ -59,6 +139,8 @@ Mise à jour : 2026-09-25. Source de vérité pour les changements locaux et leu
 - Scène « Cycle footbridge » 0.5.0 : 400 010 triangles, 27 appels de rendu sans nuages et 28 avec nuages; reconstruction entre 159 et 185 ms sur les échantillons observés. Temps CPU par image mesurés entre 0,4 et 2,3 ms selon l'échantillon; ces valeurs ne sont ni des mesures GPU ni une garantie de FPS. L'option nuages ajoute un seul appel de rendu.
 
 ## Journal de publication
+
+- 0.5.0 (révision du 2026-09-26) : correctifs Notion du 2026-09-26, numéro de version conservé.
 
 - 0.4.1 a été publiée dans une session précédente.
 - 0.4.2 a été poussée en plusieurs commits jusqu'à `23bb6a4`.

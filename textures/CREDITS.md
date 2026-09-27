@@ -5,7 +5,7 @@ CC0 public-domain assets from Poly Haven, bundled locally. Older assets were con
 - Asphalt 01: https://polyhaven.com/a/asphalt_01 — Charlotte Baglioni / Dario Barresi; diffuse + normal, 2.1 m repeat.
 - Concrete Wall 009: https://polyhaven.com/a/concrete_wall_009 — Charlotte Baglioni; diffuse + normal, 1.8 m repeat.
 - Rough Concrete: https://polyhaven.com/a/rough_concrete — Dimitrios Savva; diffuse + OpenGL normal + roughness, used for bridge concrete.
-- Rock Ground: https://polyhaven.com/a/rock_ground — diffuse + OpenGL normal + roughness at 1K, used for optional stone-faced approach cones and front slopes.
+- Riprap (approach cones and front slopes): procedural BridgeSketch texture, see GENERATED.md. The earlier Poly Haven Rock Ground maps were retired in 0.5.0.
 - Leafy Grass: https://polyhaven.com/a/leafy_grass — Charlotte Baglioni; diffuse, 2 m repeat.
 - License: https://polyhaven.com/license
 
@@ -19,3 +19,10 @@ The local river colour and normal maps are adapted from CC0 textures shared by H
 - [Three Live Procedurally Generated Tiling Water Textures](https://opengameart.org/content/3-live-proceduraly-generated-tiling-water-textures-512px-running-brushes) by qubodup: the brushwalker 137 tile was converted into the ripple normal map.
 
 Both source pages mark the textures as [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). The resulting WebP files are bundled under `textures/`; no runtime download is needed.
+
+## 2026-09-27 additions
+
+- `bark-color.webp`, `bark-normal.webp`: ambientCG bark (CC0), resized from the set bundled with EZ-Tree.
+- `leaf-oak.webp`, `leaf-ash.webp`, `leaf-aspen.webp`: EZ-Tree leaf cards (MIT, Daniel Greenheck, https://github.com/dgreenheck/ez-tree), resized.
+- `ballast.webp`: procedural crushed-stone texture generated for BridgeSketch 3D (NumPy Voronoi), no third-party source.
+- Tree generator code: `vendor/ez-tree/` (MIT, see `vendor/ez-tree/LICENSE.txt`), imports adapted for offline ES modules.

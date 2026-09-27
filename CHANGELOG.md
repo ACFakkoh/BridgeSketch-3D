@@ -1,6 +1,47 @@
 # BridgeSketch 3D
 
-## 0.5.0 — 2026-09-25 — Anthony Chéruel
+## Non publié — correctifs du 2026-09-27 — Anthony Chéruel
+
+- Defaults for every preset: dynamic clouds, calm mirror river, High quality, atmospheric haze (optional, tinted by the hour).
+- Deck: MTQ Type 201 / 301 concrete barriers, 301 barrier in front of a sidewalk, 450 × 280 wheel curbs and 280 mm sidewalks with a 35/280 road face and 1 % crossfall; 200/225/250 mm slab; dashed lane lines (yellow between directions); approach barriers: none, continued railings or W-beam (pedestrian bridges: none or curb + 20C).
+- Structure: support diaphragm or K-bracing from girder depth and spacing (MTQ Table 10.5-1); rectangular columns and adjustable outer column spacing; adjustable front-slope start; paint colour calibrated to the swatch.
+- Site: EZ-Tree procedural trees (MIT), denser meadow (Balanced = former High) continuing under the deck, uniform soil cut faces on all edges, 0.5 m crushed-stone railway ballast (clearance above ballast), random train mix; scene width up to 600 m and approaches up to 200 m.
+- Street lights on the left, right or both sides; separate finish for fascia (edge) girders; a launch sequence under 5 s (self-drawing blueprint elevation, wordmark, real progress, curtain lift and camera fly-in; click or key to skip).
+- Night lighting (LED street lights or 20C handrail LEDs, 20:00–06:30), light rain and snow, zoomable section view (SVG button removed).
+
+## Non publié — R&D rendu — 2026-09-26 — Anthony Chéruel
+
+- River: half-resolution planar reflection, PBR Fresnel, tileable generated wave normals flowing downstream, depth-based tint, shoreline foam and sun glints; the water plane runs under raised banks so the terrain draws a natural shoreline.
+- Meadow: budgeted instanced tufts (7 curved blades) with GPU wind, root-to-tip gradient, up-facing normals and golden-hour back-lighting, denser near the bridge; small wildflowers in rural scenes. Adapted from three-stylized (MIT) ideas.
+- Sky: sunset scattering gradient, sun halo and sun-lit clouds; the sky is captured as image-based lighting on each time change and is now the viewport backdrop (except on the white background).
+- New Render quality setting (Performance / Balanced / High) for reflection resolution, meadow density, shadow map size and pixel ratio.
+
+## 0.5.0 — 2026-09-26 — Anthony Chéruel
+
+Follow-up of 2026-09-26 (evaluation items 2–6):
+
+- Transverse section with dimension chains (deck zones, total width, girder spacing, structure depth) and a title block (variant, version, date, author).
+- Light atmospheric haze sized to the model and tinted by the hour; river with Fresnel depth and roughness (no noon blow-out), shallow banks and foam line; meadow tinted wetter near water, drier on slopes, lawn-like in urban scenes; grey bank boulders.
+- Internal 25 mm plate diaphragms inside every steel box on each bearing line.
+- Code: sources formatted (Prettier, 120 columns); `scene.mjs` split into `materials`, `sections`, `steel-details`, `railings`, `traffic` and `terrain` modules; developer checks now in the repository as `tests/check.mjs`; `.gitattributes` normalises line endings.
+- README screenshots regenerated with 0.5.0, adding the cycle footbridge and the dimensioned section.
+
+Review round of 2026-09-26 (version number kept at 0.5.0):
+
+- Deck: 65 mm asphalt now covers the roadway only; sidewalks, wheel curbs, concrete barriers and medians stand on the slab. Steel railings on a raised sidewalk are anchored in the sidewalk without a wheel curb. The ends of curbs, barriers and every swept solid are closed with outward-facing concrete faces.
+- Steel plate girders: cross-frames at 8 m or less in every span, deep transverse diaphragms (web + flanges) on every bearing line at abutments and piers, 14 mm vertical stiffeners following the local depth and the skew — on interior faces at cross-frames, and three at 150 mm on every face at bearings. Box girders get diaphragms but no stiffeners.
+- Steel boxes: the bottom flange now drives box width, gaps and cantilevers instead of being rejected; top flanges stay straight and parallel where the box deepens at supports (webs 1H:4V at typical depth, steeper in the haunches).
+- Supports: 75 mm bearings sit on constant 150 mm plinths; pier caps, pier walls and abutment seats follow the plinth undersides across the deck. Tapered bent-cap ends are closed and textured.
+- Front-of-abutment slopes are 2H:1V from the abutment face to the ground and share the toe line of the quarter cones for any span, obstacle or variable girder depth; when the crossing leaves too little room the slope starts lower on the wall. New procedural 200–300 mm riprap texture for stone slopes and cones.
+- Spans up to 150 m, curve radii down to 30 m (at least deck half-width + 12 m), deeper girders (up to 5 m typical, 8 m at supports). Shadows adapt to the model size.
+- Deck haunch fixed at 50 mm and removed from the parameters.
+- Finishes: AMS 15090 blue removed (old files map to 15065); AMS 16515 light gray (#C7C9C7) added for a Pont Saint-Jacques look.
+- Named variants: the name appears in the viewer title and in JSON, snapshot, SVG and GLB file names with the save date and software version (e.g. `BridgeSketch-Option-A_2026-09-26_v0.5.0.json`).
+- Cyclists rebuilt with a diamond frame, spoked wheels, drop bars and a leaning rider; wheels, cranks and legs animate with the distance travelled.
+- Transverse section: 15 × 15 mm chamfers on concrete outlines, asphalt limited to the roadway, medians drawn, curb-less sidewalk railings and dashed stiffeners. Time and view overlays hide in section view; scene titles gain a stronger shadow for legibility.
+
+Initial 0.5.0 release (2026-09-25):
+
 
 - Added a cycle-traffic mode with moving low-poly cyclists and a one-span cycle-footbridge preset.
 - 3–6 m cycle decks accept one narrow lane, two to four steel plate girders, or one steel box; the 3 m and 6 m extremes are covered by geometry checks.
