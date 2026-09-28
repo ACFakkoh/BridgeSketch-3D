@@ -19,6 +19,7 @@ import {
   girderDepth,
   supportStation,
   archSpanIndex,
+  psboxLayout,
 } from './geometry.mjs';
 import { psboxParts } from './systems.mjs';
 import { release } from './release.mjs';
@@ -54,6 +55,8 @@ import { grassUniforms } from './grass.mjs';
 import { cloudShadow } from './materials.mjs';
 import { renderSettings, effectiveQuality, setGpuName, stepDownAuto, gpuInfo } from './quality.mjs';
 
+// Golden hour: the sun about 7° above the horizon, 30 min before sunset.
+const GOLDEN_HOUR = 19;
 const $ = id => document.getElementById(id),
   form = $('parameters');
 let config = makePreset(presets[0].id),
@@ -84,7 +87,8 @@ let needsRender = true,
 // (rebuild, time of day, moving traffic at about 11 Hz, tree level-of-detail swaps at 2 Hz); ambient
 // animation alone (water, clouds, wind, weather) renders at 30 fps; the reflection is refreshed every other
 // frame while the camera is still.
-let shadowDirty = true,
+let timeAppliedAt = 0,
+  shadowDirty = true,
   shadowSoft = false,
   shadowAt = 0,
   lastInteraction = 0,
@@ -250,7 +254,8 @@ function syncEnabled() {
   form.elements.taper.disabled = !config.variableDepth;
   form.elements.variableDepth.checked = config.variableDepth;
   form.elements.girders.step = '1';
-  $('girder-count-label').hidden = box || slab;
+  $('girder-count-label').hidden = box || slab || psbox;
+  $('psbox-count-label').hidden = !psbox;
   $('box-count-label').hidden = !box;
   $('boxCount').value = config.girders;
   form.elements.girders.value = config.girders;
@@ -320,7 +325,7 @@ function syncEnabled() {
   form.elements.rise.disabled = config.profile !== 'crest';
   form.elements.grade.disabled = config.profile !== 'constant';
   $('material-note').textContent = psbox
-    ? `Prestressed concrete box · ${config.width > 16 ? 'two cells' : 'one cell'}, inclined webs, depth from the deck top`
+    ? `Prestressed concrete ${config.psboxCount > 1 ? config.psboxCount + ' single-cell boxes' : 'box · ' + (config.width > 16 ? 'two cells' : 'one cell')}, inclined webs, depth from the deck top`
     : slab
     ? config.variableDepth
       ? 'Solid concrete slab · variable depth'
@@ -356,9 +361,12 @@ function readForm() {
 }
 function applyTimeOfDay(hour) {
   if (!scene?.userData.lights) return;
-  const angle = ((hour - 6) * Math.PI) / 14,
-    daylight = T.MathUtils.smoothstep(hour, 5.5, 8) * (1 - T.MathUtils.smoothstep(hour, 18.2, 21.5));
-  const golden = Math.exp(-(((hour - 17.5) / 1.25) ** 2)) * daylight;
+  // Sun from 06:30 to 19:30 (autumn day). Daylight follows the sun elevation, so the evening only gets darker:
+  // golden hour when the sun is low (about 18:30–19:30, peak 19:05), then blue hour, then night from 20:00.
+  const angle = ((hour - 6.5) * Math.PI) / 13,
+    elevation = Math.sin(angle),
+    daylight = T.MathUtils.smoothstep(elevation, -0.14, 0.22);
+  const golden = Math.exp(-(((elevation - 0.1) / 0.12) ** 2)) * T.MathUtils.smoothstep(elevation, -0.13, 0);
   scene.userData.daylight = daylight;
   const tint = (night, day, gold) =>
     new T.Color(night).lerp(new T.Color(day), daylight).lerp(new T.Color(gold), golden);
@@ -366,10 +374,10 @@ function applyTimeOfDay(hour) {
   sun.position.set(Math.cos(angle) * 80, 8 + 60 * Math.max(0, Math.sin(angle)), 40);
   shadowDirty = true;
   sun.color.copy(tint('#a9c7ed', '#fff3dd', '#ff9a68'));
-  sun.intensity = 0.4 + 2.8 * daylight - golden;
+  sun.intensity = 0.4 + 2.8 * daylight - 0.35 * golden;
   hemi.color.copy(tint('#7186a8', '#e1efff', '#ffc98f'));
   hemi.groundColor.copy(tint('#283844', '#687560', '#3d2930'));
-  hemi.intensity = 0.65 + 1.75 * daylight - 1.1 * golden;
+  hemi.intensity = 0.65 + 1.75 * daylight - 0.55 * golden;
   fill.color.copy(tint('#7293bf', '#c8ddfa', '#ffcfab'));
   fill.intensity = 0.3 + 0.95 * daylight - 0.4 * golden;
   rim.intensity = 0.15 + 0.55 * daylight + 0.15 * golden;
@@ -419,7 +427,7 @@ function applyTimeOfDay(hour) {
   $('timeOfDay').value = hour;
   $('timeLabel').textContent =
     String(Math.floor(hour)).padStart(2, '0') + ':' + String(Math.round((hour % 1) * 60)).padStart(2, '0');
-  $('dusk').checked = hour >= 16.5 && hour <= 18.5;
+  $('dusk').checked = golden > 0.5 && hour > 12;
   needsRender = true;
 }
 // Section view zoom: wheel zooms about the pointer, drag pans, double-click resets (like the 3D views).
@@ -688,7 +696,8 @@ function renderSection() {
   if (road.medianWidth) deckMarks.push(road.medianMin, road.medianMax);
   chain(deckMarks, 1.85);
   chain([-half, half], 2.45);
-  if (c.material !== 'slab' && c.girders > 1)
+  if (c.material === 'psbox') chain([-half, half, ...psboxLayout(c).centres], bottom - 0.55, bottom - 0.1);
+  else if (c.material !== 'slab' && c.girders > 1)
     chain([-half, half, ...Array.from({ length: c.girders }, (_, g) => -half + c.overhang + g * spacing(c))], bottom - 0.55, bottom - 0.1);
   // Structure depth at the section, beside the left edge.
   dims += `<line x1="${X(-half - 0.7)}" x2="${X(-half - 0.7)}" y1="${Y(0)}" y2="${Y(bottom)}" stroke="#557279"/><line x1="${X(-half - 0.7) - 4}" x2="${X(-half - 0.7) + 4}" y1="${Y(0) + 4}" y2="${Y(0) - 4}" stroke="#17374b" stroke-width="1.4"/><line x1="${X(-half - 0.7) - 4}" x2="${X(-half - 0.7) + 4}" y1="${Y(bottom) + 4}" y2="${Y(bottom) - 4}" stroke="#17374b" stroke-width="1.4"/><text transform="translate(${X(-half - 0.7) - 6} ${(Y(0) + Y(bottom)) / 2}) rotate(-90)" text-anchor="middle" font-size="11.5" fill="#17374b">${fmt(-bottom)}</text>`;
@@ -756,6 +765,7 @@ function update(raw, { resetCamera = false, refresh = false } = {}) {
   });
   $('triangles').innerHTML = `${(triangles / 1000).toFixed(1)}<small>k tris</small>`;
   updateHeading();
+  syncTimePlay();
   $('sceneSubtitle').textContent =
     `${config.spans.length} ${config.spans.length === 1 ? 'span' : 'spans'} · ${
       { frame: 'Rigid frame · ', strutted: 'Strutted frame · ', arch: config.archType === 'tied' ? 'Tied ' + config.archMaterial + ' arch · ' : config.archMaterial[0].toUpperCase() + config.archMaterial.slice(1) + ' deck arch · ' }[config.structureSystem] ?? ''
@@ -805,6 +815,13 @@ function applyReveal() {
   const hide = $('reveal').checked && !driving;
   model.deck.visible = model.haunches.visible = !hide;
   if (model.lighting) model.lighting.group.visible = !hide;
+}
+function syncTimePlay() {
+  const on = config.timeFlow;
+  $('timePlay').textContent = on ? '❚❚' : '▶';
+  $('timePlay').setAttribute('aria-pressed', on);
+  $('timePlay').title = on ? 'Stop the time (15 min every 5 s)' : 'Let the time run (15 min every 5 s)';
+  needsRender = true;
 }
 function updateHeading() {
   $('sceneTitle').textContent =
@@ -1105,6 +1122,10 @@ async function boot() {
   new ResizeObserver(resize).observe($('canvasHost'));
   resize();
   controls.addEventListener('change', () => (needsRender = true));
+  $('timePlay').onclick = () => {
+    config.timeFlow = !config.timeFlow;
+    syncTimePlay();
+  };
   $('timeOfDay').oninput = () => {
     config.timeOfDay = Number($('timeOfDay').value);
     applyTimeOfDay(config.timeOfDay);
@@ -1112,7 +1133,7 @@ async function boot() {
   $('sectionStation').oninput = renderSection;
   setupSectionZoom();
   $('dusk').onchange = () => {
-    config.timeOfDay = $('dusk').checked ? 17.5 : 12;
+    config.timeOfDay = $('dusk').checked ? GOLDEN_HOUR : 12;
     applyTimeOfDay(config.timeOfDay);
   };
   $('tour').onchange = () => {
@@ -1130,7 +1151,9 @@ async function boot() {
     if (e.key === 'Escape') stopDriving();
   });
   renderer.setAnimationLoop(time => {
-    const dt = Math.min(0.05, (time - lastTime) / 1000);
+    const dt = Math.min(0.05, (time - lastTime) / 1000),
+      // Wall-clock step for the flowing time, so a slow computer does not slow the day down.
+      clockDt = Math.min(0.5, Math.max(0, (time - lastTime) / 1000));
     lastTime = time;
     if (document.hidden) return;
     if (fly) flyFrame(time);
@@ -1150,9 +1173,19 @@ async function boot() {
     // Moving cloud shadows drift with the sky (materials.mjs); they follow the sun, not the shadow map.
     cloudShadow.time.value = skyTime;
     // Wind only moves the meadow while the scene is already animating, so a still view costs no frames.
-    const animated = flowing || moving || controls.autoRotate || cloudy || weather.active;
+    const animated = flowing || moving || controls.autoRotate || cloudy || weather.active || config.timeFlow;
     if (animated) grassUniforms.grassTime.value += dt;
-    if (envDirty && time - envAt > 120) {
+    // Flowing time: 15 minutes every 5 s by day (3 min per second), three times faster at night; the lighting
+    // is re-applied twice a second and the sky lighting re-captured every 1.5 s, so the cost stays small.
+    if (config.timeFlow && !driving && view !== 'section') {
+      const night = (scene.userData.daylight ?? 1) < 0.05;
+      config.timeOfDay = (config.timeOfDay + clockDt * (night ? 0.15 : 0.05)) % 24;
+      if (time - timeAppliedAt > 500) {
+        applyTimeOfDay(config.timeOfDay);
+        timeAppliedAt = time;
+      }
+    }
+    if (envDirty && time - envAt > (config.timeFlow ? 1500 : 120)) {
       scene.environment = sky.environment(renderer, config.skyMode === 'clouds');
       envDirty = false;
       envAt = time;
@@ -1419,7 +1452,8 @@ function selectPreset(id) {
   $('preset').value = id;
   if (!config.name) $('sceneTitle').textContent = preset.label;
   $('preset').title = preset.description;
-  $('tour').checked = true;
+  // Orbit stays off by default (0.5.6); time keeps flowing as configured.
+  $('tour').checked = false;
   $('tour').onchange();
   $('feedback').hidden = true;
 }

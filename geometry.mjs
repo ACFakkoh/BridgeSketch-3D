@@ -75,7 +75,8 @@ export const defaults = {
   terrainShape: 'natural',
   sceneWidth: 140,
   background: 'blue',
-  timeOfDay: 17.5,
+  timeOfDay: 18,
+  timeFlow: true,
   seed: 17,
   trainStyle: 'mixed',
   medianType: 'none',
@@ -88,20 +89,37 @@ export const defaults = {
   archMaterial: 'concrete',
   archSpan: -1,
   archRise: 0.18,
+  psboxCount: 1,
   spans: [25, 25, 25].map(length => ({ length, obstacle: 'water', width: 22, elevation: 0, angle: 90 })),
 };
 export const depths = [1, 1.2, 1.4, 1.6, 1.8];
 // Cast-in-place and prestressed concrete superstructures: solid slab and box girder (« psbox »).
 export const isConcreteDeck = c => c.material === 'slab' || c.material === 'psbox';
-// Prestressed box girder layout: outer web faces at the top slab, 1:4.5 web batter, 450 mm webs, one cell up
-// to 16 m of deck, two cells above. The bottom slab narrows where the box deepens at supports.
+// Prestressed box girder layout: 1–4 single-cell boxes side by side under one deck slab (a single box gets two
+// cells above 16 m of deck). Outer web faces at the top slab, 1:4.5 web batter, 450 mm webs; the bottom slab
+// narrows where the box deepens at supports. `top` / `bottom` are half-widths about each box centre.
 export function psboxLayout(c, depth = c.depth) {
   const half = c.width / 2,
-    top = Math.max(1.3, Math.min(half - 1.1, 0.29 * c.width)),
+    count = Math.max(1, Math.min(4, c.psboxCount ?? 1)),
+    pitch = c.width / count,
+    top =
+      count === 1
+        ? Math.max(1.3, Math.min(half - 1.1, 0.29 * c.width))
+        : Math.max(1.1, Math.min(pitch / 2 - 0.55, 0.33 * pitch)),
     deepest = c.variableDepth ? Math.max(c.pierDepth, c.depth) : c.depth,
-    batter = Math.min(0.22, (top - 1.05) / Math.max(0.5, deepest - c.deck)),
-    bottom = top - batter * (depth - c.deck);
-  return { half, top, bottom, batter, web: 0.45, cells: c.width > 16 ? 2 : 1, slab: 0.25 };
+    batter = Math.min(0.22, (top - 0.95) / Math.max(0.5, deepest - c.deck)),
+    bottom = top - batter * (depth - c.deck),
+    centres = Array.from({ length: count }, (_, i) => -half + pitch * (i + 0.5));
+  return { half, top, bottom, batter, web: 0.45, cells: count === 1 && c.width > 16 ? 2 : 1, slab: 0.25, count, pitch, centres };
+}
+// Bearing positions across the deck (u): under every girder, or under the webs of each concrete box.
+export function bearingPositions(c) {
+  if (c.material === 'psbox') {
+    const box = psboxLayout(c, c.variableDepth ? c.pierDepth : c.depth),
+      d = Math.max(0.5, box.bottom - 0.45);
+    return box.centres.flatMap(u => (box.cells > 1 ? [u - d, u, u + d] : [u - d, u + d]));
+  }
+  return Array.from({ length: c.girders }, (_, g) => -c.width / 2 + c.overhang + g * spacing(c));
 }
 // Supports without bearings: every support of a rigid frame, the leg joints of a strutted frame.
 export function monolithicSupport(c, j) {
@@ -290,6 +308,7 @@ export function validate(raw) {
   c.deck = Number(c.deck);
   if (![0.2, 0.225, 0.25].includes(c.deck)) throw Error('Slab thickness: select 200, 225 or 250 mm.');
   if (typeof c.fog !== 'boolean') throw Error('Invalid atmospheric haze option.');
+  if (typeof c.timeFlow !== 'boolean') throw Error('Invalid time flow option.');
   if (!['clear', 'rain', 'snow', 'leaves'].includes(c.weather)) throw Error('Select the weather: clear, rain, snow or falling leaves.');
   if (
     !['vehicles', 'cyclists'].includes(c.trafficMode) ||
@@ -461,9 +480,13 @@ export function validate(raw) {
   });
   // Box girder: bearings under the webs (two, or three with a centre web), set from the section at the supports.
   if (c.material === 'psbox') {
-    const box = psboxLayout(c, c.variableDepth ? c.pierDepth : c.depth);
-    c.girders = box.cells + 1;
-    c.overhang = Number((box.half - Math.max(0.6, box.bottom - 0.45)).toFixed(3));
+    if (!Number.isInteger(c.psboxCount) || c.psboxCount < 1 || c.psboxCount > 4)
+      throw Error('Concrete box girders: 1 to 4 boxes.');
+    if (c.width / c.psboxCount < 4.2)
+      throw Error(`Each concrete box needs at least 4.2 m of deck: use at most ${Math.max(1, Math.floor(c.width / 4.2))} boxes or widen the deck.`);
+    const bearings = bearingPositions(c);
+    c.girders = bearings.length;
+    c.overhang = Number((c.width / 2 + bearings[0]).toFixed(3));
   }
   if (c.girders === 1 && c.material !== 'box') throw Error('One girder is available for steel box bridges only.');
   if (

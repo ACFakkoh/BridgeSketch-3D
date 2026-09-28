@@ -1038,6 +1038,42 @@ for (const v of [
   assert.equal(stepDownAuto('performance'), null);
   for (const p of presets) assert.ok(makePreset(p.id).renderQuality === 'balanced', p.id + ' defaults to Balanced');
 }
+// 0.5.6: several concrete boxes, flowing time, meandering banks in the profile-following terrain.
+{
+  const { bearingPositions, psboxLayout } = await import('../geometry.mjs');
+  const { terrainSampler, coordinates } = await import('../terrain.mjs');
+  const twin = validate({ ...makePreset('river'), material: 'psbox', psboxCount: 2, width: 16, depth: 2 });
+  assert.equal(psboxLayout(twin).count, 2);
+  assert.equal(bearingPositions(twin).length, 4, 'two bearings per box');
+  assert.equal(twin.girders, 4);
+  const layout = psboxLayout(twin);
+  assert.ok(layout.centres[1] - layout.centres[0] - 2 * layout.top >= 1, 'at least 1 m between the boxes');
+  const twinModel = buildBridge(twin, materials, { batch: false });
+  let parts = 0,
+    diaphragms = 0;
+  twinModel.root.traverse(o => {
+    if (o.name === 'Box girder part') parts++;
+    if (o.name === 'Box girder diaphragm') diaphragms++;
+  });
+  assert.equal(parts, 10);
+  assert.equal(diaphragms, 2 * (twin.spans.length + 1));
+  disposeModel(twinModel);
+  assert.throws(() => validate({ ...twin, psboxCount: 4, width: 12 }), /4\.2 m/);
+  assert.throws(() => validate({ ...twin, psboxCount: 5 }), /1 to 4/);
+  assert.equal(defaults.timeFlow, true);
+  assert.throws(() => validate({ ...twin, timeFlow: 'yes' }), /time flow/);
+  for (const p of presets) assert.equal(makePreset(p.id).timeFlow, true);
+  // Profile terrain: the shoreline moves along the river (not a straight cut).
+  const cut = makePreset('deck-arch'),
+    ground = terrainSampler(cut),
+    shoreAt = z => {
+      for (let x = 0; x < 40; x += 0.1) if (ground(x, z) > 0.05) return x;
+      return 40;
+    },
+    shores = [-60, -30, 0, 30, 60].map(shoreAt);
+  assert.ok(Math.max(...shores) - Math.min(...shores) > 1.5, 'meandering bank: ' + shores.map(v => v.toFixed(1)).join(', '));
+  void coordinates;
+}
 for (const m of Object.values(materials)) (m.isMaterial ? [m] : Object.values(m)).forEach(x => x.dispose());
 const html = await readFile('index.html', 'utf8');
 for (const match of html.matchAll(/(?:src|href)="\.\/([^"]+)"/g)) assert.ok((await readFile('' + match[1])).length);

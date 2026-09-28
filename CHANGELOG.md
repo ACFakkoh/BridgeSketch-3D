@@ -1,5 +1,14 @@
 # BridgeSketch 3D
 
+## 0.5.6 — 2026-09-27 — Anthony Chéruel
+
+- Orbit is off by default, at start-up and when a concept is selected.
+- Time runs by default: 15 minutes every 5 seconds by day, three times faster at night (wall-clock, lighting re-applied twice a second); a ❚❚ / ▶ button next to the slider stops or restarts it. The setting is saved (`timeFlow`). Concepts open at 18:00.
+- Daylight follows the sun elevation (sunrise 06:30, sunset 19:30): golden hour when the sun is low (peak about 19:05, **Golden hour** = 19:00), then blue hour and night lights from 20:00. The scene no longer brightens again after golden hour.
+- Profile-following terrain: the river meanders (about ±6 m) with irregular shorelines, varying berms and valley sides; valley walls undulate away from the bridge.
+- Prestressed concrete box girders: 1 to 4 single-cell boxes under one deck slab (at least 4.2 m of deck per box), two bearings and a diaphragm per box on each support line, dimensioned in the section. The Box girder viaduct concept now has twin boxes under a 16.5 m, four-lane deck.
+- Stats overlay moved to the bottom centre (the navigation hint hides while it is shown).
+
 ## 0.5.5 — 2026-09-27 — Anthony Chéruel
 
 Directives « Bridge Sketch 3D directives 2026-09-27 V2 suite »:

@@ -28,7 +28,11 @@ export function world(o, along, across, y) {
   return [o.x + o.dx * along + o.nx * across, y, o.z + o.dz * along + o.nz * across];
 }
 
-export function riverWiggle(t) {
+// River centreline offset along its course. With the profile-following terrain the river meanders more widely
+// (about ±6 m over a 200 m wavelength), so the channel no longer reads as a straight cut.
+export function riverWiggle(t, c) {
+  if (c?.terrainShape === 'profile')
+    return Math.sin(t * 0.031 + 0.8) * 5.2 + Math.sin(t * 0.083) * 1.3 + Math.sin(t * 0.17) * 0.35;
   return Math.sin(t * 0.045) * 2.4 + Math.sin(t * 0.1) * 0.7;
 }
 
@@ -60,7 +64,7 @@ export function obstacleTour(c) {
     water = span.obstacle === 'water';
   const across = water
     ? T.MathUtils.clamp(
-        atBridge.across - riverWiggle(atBridge.along),
+        atBridge.across - riverWiggle(atBridge.along, c),
         -obstacle.width / 2 + 1.3,
         obstacle.width / 2 - 1.3,
       )
@@ -86,7 +90,7 @@ export function obstacleTour(c) {
     pose(distance) {
       const along = atBridge.along + distance;
       return {
-        position: world(obstacle, along, across + (water ? riverWiggle(along) : 0), span.elevation + eye),
+        position: world(obstacle, along, across + (water ? riverWiggle(along, c) : 0), span.elevation + eye),
         target: [bridge.x, underside - 0.1, bridge.z],
       };
     },
@@ -120,7 +124,7 @@ export function terrainSampler(c) {
     let y = 0.22 + 0.25 * Math.sin(x * 0.053) * Math.cos(z * 0.072);
     for (const o of obstacles) {
       const p = coordinates(o, x, z),
-        distance = Math.abs(p.across - (o.type === 'water' ? riverWiggle(p.along) : 0)),
+        distance = Math.abs(p.across - (o.type === 'water' ? riverWiggle(p.along, c) : 0)),
         blend = T.MathUtils.clamp((o.width / 2 + 3 - distance) / 3, 0, 1);
       // Banks rise at least 0.2 m above the water so the extended river surface meets them in a natural shoreline.
       if (o.type === 'water') {
@@ -139,6 +143,17 @@ export function terrainSampler(c) {
   const L = totalLength(c),
     deepest = c.material === 'slab' ? (c.variableDepth ? c.pierDepth : c.slabDepth) : c.variableDepth ? c.pierDepth : c.depth,
     seatDrop = c.asphalt + c.deck + c.haunch + deepest + 0.45;
+  // Smooth 1D value noise (0–1) for irregular banks and valley walls.
+  const hash = n => {
+      const v = Math.sin(n * 127.1 + c.seed * 3.7) * 43758.5453;
+      return v - Math.floor(v);
+    },
+    noise = t => {
+      const i = Math.floor(t),
+        f = t - i,
+        k = f * f * (3 - 2 * f);
+      return hash(i) * (1 - k) + hash(i + 1) * k;
+    };
   return (x, z) => {
     const floor = natural(x, z),
       s = alignmentStation(c, x, z),
@@ -148,15 +163,28 @@ export function terrainSampler(c) {
       end = supportStation(c, L, u) - 0.9;
     let y = profile(c, s) - 0.25;
     if (s > start - 0.9 && s < end + 0.9) {
-      const inside = Math.max(0, Math.min(s - start, end - s));
+      // Valley walls: straight and tidy beside the bridge, gently undulating away from it.
+      const away = T.MathUtils.smoothstep(Math.abs(u), c.width / 2 + 4, c.width / 2 + 30),
+        wobble = away * 6 * (noise(u * 0.045 + 11) - 0.5),
+        inside = Math.max(0, Math.min(s - start + wobble, end - s + wobble));
       y = Math.min(y, Math.min(profile(c, start), profile(c, end)) - seatDrop - inside / 2);
     }
     for (const o of obstacles) {
       const p = coordinates(o, x, z),
-        d = Math.abs(p.across - (o.type === 'water' ? riverWiggle(p.along) : 0)),
-        berm = o.type === 'water' ? 3 : 1.5,
-        top = o.type === 'water' ? o.elevation + 0.2 : o.elevation - 0.12;
-      y = Math.min(y, top + Math.max(0, d - o.width / 2 - berm) / 2);
+        signed = p.across - (o.type === 'water' ? riverWiggle(p.along, c) : 0),
+        d = Math.abs(signed);
+      if (o.type === 'water') {
+        // Meandering banks: the shoreline wanders inside the channel, a low beach, then a berm of varying
+        // width and a 2H:1V valley side, each bank on its own rhythm.
+        const bank = (signed < 0 ? 0 : 50) + p.along * 0.035,
+          shore = o.width / 2 - 4.5 * noise(bank) + 1.2 * noise(bank * 2.7 + 5) - 0.3,
+          berm = 3 + 14 * noise((signed < 0 ? 90 : 140) + p.along * 0.016) + 4 * noise(bank * 0.9 + 21),
+          out = d - shore;
+        if (out > 0) y = Math.min(y, o.elevation + 0.2 + Math.min(out, 4) * 0.08 + Math.max(0, out - berm) / 2);
+        else y = Math.min(y, o.elevation - 0.65 + Math.max(0, 1 + out) * 0.85);
+        continue;
+      }
+      y = Math.min(y, o.elevation - 0.12 + Math.max(0, d - o.width / 2 - 1.5) / 2);
     }
     return Math.max(floor, y);
   };
@@ -546,7 +574,7 @@ export function addEnvironment(c, m, parent, fills) {
     for (let j = 0; j <= riverSteps; j++)
       for (let k = 0; k <= across; k++) {
         const along = -riverReach + (j * 2 * riverReach) / riverSteps;
-        pos.push(...world(o, along, -reach + (2 * reach * k) / across + riverWiggle(along), g.elevation));
+        pos.push(...world(o, along, -reach + (2 * reach * k) / across + riverWiggle(along, c), g.elevation));
       }
     for (let j = 0; j < riverSteps; j++)
       for (let k = 0; k < across; k++) {
@@ -589,7 +617,7 @@ export function addEnvironment(c, m, parent, fills) {
     for (let k = 0; k < clipped.length; k += 3) {
       const p = coordinates(o, clipped[k], clipped[k + 2]);
       riverUV.push(p.along, p.across);
-      shore.push((p.across - riverWiggle(p.along)) / (width / 2));
+      shore.push((p.across - riverWiggle(p.along, c)) / (width / 2));
       depth.push(Math.max(0, g.elevation - terrainHeight(clipped[k], clipped[k + 2])));
       flow.push(o.dx, o.dz);
     }
@@ -818,7 +846,7 @@ export function addEnvironment(c, m, parent, fills) {
   const occupied = (x, z, margin = 2) => {
     for (const o of obstacles) {
       const p = coordinates(o, x, z);
-      if (Math.abs(p.across - (o.type === 'water' ? riverWiggle(p.along) : 0)) < o.width / 2 + margin) return true;
+      if (Math.abs(p.across - (o.type === 'water' ? riverWiggle(p.along, c) : 0)) < o.width / 2 + margin) return true;
     }
     return intersectsRoad(roadZones, x, z, margin);
   };
@@ -852,7 +880,7 @@ export function addEnvironment(c, m, parent, fills) {
   for (const o of obstacles.filter(o => o.type === 'water'))
     for (let along = -riverReach; along < riverReach; along += 1.8)
       for (const side of [-1, 1]) {
-        const p = world(o, along, riverWiggle(along) + side * (o.width / 2 + 1.9 + rng() * 1.3), 0);
+        const p = world(o, along, riverWiggle(along, c) + side * (o.width / 2 + 1.9 + rng() * 1.3), 0);
         if (Math.abs(p[0]) < extent / 2 - 1 && Math.abs(p[2]) < halfZ - 1)
           rocks.push({ x: p[0], z: p[2], y: terrainHeight(p[0], p[2]), s: 0.2 + rng() * 0.5, r: rng() * 6 });
       }
@@ -871,7 +899,7 @@ export function addEnvironment(c, m, parent, fills) {
       obstacles.some(o => {
         if (o.type !== 'water') return false;
         const p = coordinates(o, x, z);
-        return Math.abs(p.across - riverWiggle(p.along)) < o.width / 2 + 2.3;
+        return Math.abs(p.across - riverWiggle(p.along, c)) < o.width / 2 + 2.3;
       });
     // Grass continues under the deck; only the supports, approach fills and crossings stay clear.
     const groundZones = roadFootprints(c, fills, false),
@@ -884,7 +912,7 @@ export function addEnvironment(c, m, parent, fills) {
       clearGround = (x, z, margin) => {
         for (const o of obstacles) {
           const p = coordinates(o, x, z);
-          if (Math.abs(p.across - (o.type === 'water' ? riverWiggle(p.along) : 0)) < o.width / 2 + margin) return true;
+          if (Math.abs(p.across - (o.type === 'water' ? riverWiggle(p.along, c) : 0)) < o.width / 2 + margin) return true;
         }
         return intersectsRoad(groundZones, x, z, margin) || nearSupport(x, z);
       };

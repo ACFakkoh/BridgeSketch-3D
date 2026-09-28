@@ -2,6 +2,16 @@
 
 Mise à jour : 2026-09-27. Source de vérité pour les changements locaux et leur état de publication.
 
+## 0.5.6 — demandes du 2026-09-27 (local, non publié)
+
+- [x] Orbit désactivé par défaut partout (démarrage et choix d'un préréglage).
+- [x] Temps qui défile par défaut : 15 min toutes les 5 s le jour, ×3 la nuit; bouton ❚❚ / ▶ pour arrêter; option enregistrée (`timeFlow`); préréglages à 18 h.
+- [x] Golden hour logique : lumière pilotée par la hauteur du soleil (lever 6 h 30, coucher 19 h 30), golden hour vers 19 h (bouton = 19 h 00), puis heure bleue et nuit dès 20 h, sans remontée de luminosité.
+- [x] Terrain « cut valley » : rivière qui méandre (±6 m), rives irrégulières, bermes et flancs de vallée variables.
+- [x] Caissons en béton précontraint : 1 à 4 caissons sous une même dalle (4,2 m de tablier minimum par caisson), appuis et diaphragmes par caisson, coupe cotée; préréglage viaduc à deux caissons.
+- [x] Stats en bas au centre.
+- [x] Vérifications : `node check.mjs` (contrôles 0.5.6), captures SwiftShader (vue en plan de la rivière, 18 h / 19 h / 19 h 45, caissons jumeaux).
+
 ## 0.5.5 — directives Notion « Bridge Sketch 3D directives 2026-09-27 V2 suite » (local, non publié)
 
 - [x] Arbres réduits (5–10,5 m) par rapport au tablier.

@@ -1132,11 +1132,13 @@ body.dock-bottom .variant-label {
   animation-delay: 0s !important;
 }
 
-/* Stats overlay (0.5.5): frame rate, CPU / GPU time, draw calls, triangles and quality tier. */
+/* Stats overlay: frame rate, CPU / GPU time, draw calls, triangles and quality tier (bottom centre, 0.5.6). */
 .perf-hud {
   position: absolute;
-  top: 12px;
-  right: 14px;
+  bottom: 9px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
   z-index: 4;
   margin: 0;
   padding: 5px 10px;
@@ -1149,4 +1151,24 @@ body.dock-bottom .variant-label {
 }
 .section-view .perf-hud {
   display: none;
+}
+#viewport:has(#perf-hud:not([hidden])) .navigation-hint {
+  display: none;
+}
+.time-control label {
+  align-items: center;
+}
+.time-play {
+  min-width: 30px;
+  padding: 2px 8px;
+  border: 1px solid #62829370;
+  border-radius: 5px;
+  background: #0b1f2e;
+  color: #9cdfcf;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.time-play[aria-pressed='false'] {
+  color: #d4e5e9;
 }

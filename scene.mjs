@@ -37,6 +37,7 @@ import {
   laneForward,
   steelFinishes,
   monolithicSupport,
+  bearingPositions,
 } from './geometry.mjs';
 import { addArch, addPsbox, addStrutLeg } from './systems.mjs';
 import { addEnvironment, approachSurfaces, frontSlopeFit, terrainSampler } from './terrain.mjs';
@@ -564,10 +565,9 @@ export function buildBridge(c, m, { batch = true } = {}) {
         y + d / 2,
       );
     }
-    for (let g = 0; g < (mono ? 0 : c.girders); g++)
+    for (const u of mono ? [] : bearingPositions(c))
       for (const side of lines) {
-        const u = -half + c.overhang + g * gspace,
-          sg = supportStation(c, s, u) + side,
+        const sg = supportStation(c, s, u) + side,
           f = frame(c, sg, u),
           underside = padBottom(u, side);
         // Bearings are fixed 75 mm elastomeric pads on 150 mm plinths, aligned to the local support.

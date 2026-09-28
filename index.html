@@ -321,6 +321,8 @@
                   >Typical slab depth · m<input name="slabDepth" type="number" min="0.3" max="2.5" step="0.05" /></label
                 ><label id="girder-count-label"
                   >Girders / span<input name="girders" type="number" min="2" max="14" step="1" /></label
+                ><label id="psbox-count-label" hidden
+                  >Concrete boxes<input name="psboxCount" type="number" min="1" max="4" step="1" /></label
                 ><label id="box-count-label" hidden
                   >Boxes / span<input id="boxCount" type="number" min="1" max="14" step="1" /></label
                 ><label id="box-bottom-width-label"
@@ -609,15 +611,17 @@
           ><button id="focus" aria-pressed="false" title="Hide parameters">Focus</button>
         </div>
         <div class="time-control">
-          <label for="timeOfDay">Time of day <output id="timeLabel" for="timeOfDay">17:30</output></label
-          ><input id="timeOfDay" type="range" min="0" max="24" step=".25" value="17.5" aria-label="Time of day" />
+          <label for="timeOfDay"
+            ><span>Time of day <output id="timeLabel" for="timeOfDay">18:00</output></span
+            ><button id="timePlay" type="button" class="time-play" aria-pressed="true" title="Stop the time">❚❚</button></label
+          ><input id="timeOfDay" type="range" min="0" max="24" step=".25" value="18" aria-label="Time of day" />
         </div>
         <div class="view-options">
           <label><input id="reveal" type="checkbox" />Reveal structure</label
           ><label><input name="showTraffic" form="parameters" type="checkbox" />Show traffic</label
           ><label><input name="movingTraffic" form="parameters" type="checkbox" />Moving traffic</label
-          ><label><input id="tour" type="checkbox" checked />Orbit</label
-          ><label><input id="dusk" type="checkbox" checked />Golden hour</label
+          ><label><input id="tour" type="checkbox" />Orbit</label
+          ><label><input id="dusk" type="checkbox" />Golden hour</label
           ><label title="Frame rate, CPU and GPU time, draw calls and quality tier"><input id="stats" type="checkbox" />Stats</label>
         </div>
         <div class="export-tools">
@@ -650,6 +654,12 @@
         <p>A quick visual tool for bridge concepts.</p>
         <p id="about-release"></p>
         <p>By Anthony Chéruel</p>
+        <h3>Version 0.5.6</h3>
+        <p>
+          Time runs by default (15 min every 5 s, stop with ❚❚), golden hour before sunset (19:00), 1–4 concrete
+          boxes under one deck, a meandering river in the profile-following terrain, Orbit off by default, Stats at the
+          bottom centre.
+        </p>
         <h3>Version 0.5.5</h3>
         <p>
           New structural systems: prestressed concrete box girders, rigid frames (portique), strutted frames with

@@ -256,12 +256,14 @@ export const presets = [
   {
     id: 'psbox',
     label: 'Box girder viaduct',
-    description: 'A curved three-span prestressed concrete box girder, haunched over tall wall piers, crossing a road, a river and a railway.',
+    description: 'Twin prestressed concrete boxes under one 16.5 m deck, curved and haunched over tall wall piers, crossing a road, a river and a railway.',
     config: {
       ...defaults,
       material: 'psbox',
       structureSystem: 'girder',
-      width: 13.5,
+      psboxCount: 2,
+      width: 16.5,
+      laneCount: 4,
       depth: 2.3,
       variableDepth: true,
       pierDepth: 4.2,

@@ -30,49 +30,54 @@ export function psboxParts(c, depthAt) {
     tb = box.slab + 0.35 * extra,
     parts = [];
   const yb = u => -c.asphalt - depthAt(u);
-  for (const side of [-1, 1]) {
-    const top = side * box.top,
-      bottom = side * box.bottom,
-      web = side * box.web;
-    // Web: outer face from the slab soffit to the bottom, 450 mm thick (measured horizontally).
+  box.centres.forEach((centre, i) => {
+    for (const side of [-1, 1]) {
+      const top = centre + side * box.top,
+        bottom = centre + side * box.bottom,
+        web = side * box.web;
+      // Web: outer face from the slab soffit to the bottom, 450 mm thick (measured horizontally).
+      parts.push(
+        clockwise([
+          [top, y1],
+          [top - web - side * 0.3, y1],
+          [top - web, y1 - 0.2],
+          [bottom - web * 1.05, yb(bottom) + tb],
+          [bottom - web * 1.05, yb(bottom)],
+          [bottom, yb(bottom)],
+        ]),
+      );
+      // Haunch under the slab outside the web: to 1.4 m from the deck edge, or halfway to the next box.
+      const outer = (side < 0 && i === 0) || (side > 0 && i === box.count - 1),
+        tipU = outer
+          ? side * Math.max(Math.abs(top) + 0.3, box.half - 1.4)
+          : top + side * Math.max(0.2, Math.min(1.2, box.pitch / 2 - box.top - 0.15));
+      parts.push(
+        clockwise([
+          [tipU, y1],
+          [top, y1],
+          [top + side * 0.02, y1 - 0.25],
+        ]),
+      );
+    }
+    // Bottom slab between the webs.
     parts.push(
       clockwise([
-        [top, y1],
-        [top - web - side * 0.3, y1],
-        [top - web, y1 - 0.2],
-        [bottom - web * 1.05, yb(bottom) + tb],
-        [bottom - web * 1.05, yb(bottom)],
-        [bottom, yb(bottom)],
+        [centre - box.bottom + box.web, yb(centre - box.bottom) + tb],
+        [centre + box.bottom - box.web, yb(centre + box.bottom) + tb],
+        [centre + box.bottom - box.web, yb(centre + box.bottom)],
+        [centre - box.bottom + box.web, yb(centre - box.bottom)],
       ]),
     );
-    // Wing haunch under the cantilever slab: 250 mm at the web, fading out 1.4 m before the deck edge.
-    const tip = side * Math.max(box.top + 0.3, box.half - 1.4);
-    parts.push(
-      clockwise([
-        [tip, y1],
-        [top, y1],
-        [top + side * 0.02, y1 - 0.25],
-      ]),
-    );
-  }
-  // Bottom slab between the webs.
-  parts.push(
-    clockwise([
-      [-box.bottom + box.web, yb(-box.bottom) + tb],
-      [box.bottom - box.web, yb(box.bottom) + tb],
-      [box.bottom - box.web, yb(box.bottom)],
-      [-box.bottom + box.web, yb(-box.bottom)],
-    ]),
-  );
-  if (box.cells > 1)
-    parts.push(
-      clockwise([
-        [-0.2, y1],
-        [0.2, y1],
-        [0.2, yb(0) + tb],
-        [-0.2, yb(0) + tb],
-      ]),
-    );
+    if (box.cells > 1)
+      parts.push(
+        clockwise([
+          [centre - 0.2, y1],
+          [centre + 0.2, y1],
+          [centre + 0.2, yb(centre) + tb],
+          [centre - 0.2, yb(centre) + tb],
+        ]),
+      );
+  });
   return { parts, box, typical, y1, tb, yb };
 }
 
@@ -87,25 +92,27 @@ export function addPsbox(c, m, structure) {
     mesh.name = 'Box girder part';
     group.add(mesh);
   }
-  // Solid diaphragms inside the box on every support line (1.2 m thick at piers, 0.9 m at abutments).
+  // Solid diaphragms inside each box on every support line (1.2 m thick at piers, 0.9 m at abutments).
   stations(c).forEach((s, j) => {
     const { box, y1, tb, yb } = psboxParts(c, depthAt(s)),
       end = j === 0 || j === c.spans.length,
-      at = end ? s + (j === 0 ? 0.5 : -0.5) : s;
-    skewPlate(
-      group,
-      m.concrete,
-      c,
-      at,
-      [
-        [-box.top + box.web, y1 + profile(c, at)],
-        [box.top - box.web, y1 + profile(c, at)],
-        [box.bottom - box.web, yb(box.bottom) + tb + profile(c, at)],
-        [-box.bottom + box.web, yb(-box.bottom) + tb + profile(c, at)],
-      ],
-      end ? 0.9 : 1.2,
-      'Box girder diaphragm',
-    );
+      at = end ? s + (j === 0 ? 0.5 : -0.5) : s,
+      y = profile(c, at);
+    for (const u of box.centres)
+      skewPlate(
+        group,
+        m.concrete,
+        c,
+        at,
+        [
+          [u - box.top + box.web, y1 + y],
+          [u + box.top - box.web, y1 + y],
+          [u + box.bottom - box.web, yb(u + box.bottom) + tb + y],
+          [u - box.bottom + box.web, yb(u - box.bottom) + tb + y],
+        ],
+        end ? 0.9 : 1.2,
+        'Box girder diaphragm',
+      );
   });
   structure.add(group);
   return group;
@@ -295,7 +302,7 @@ export function addArch(c, m, structure, earth, ground = () => -1e3) {
   // Ribs under the outer girders (inside the box for a box girder, under the webs).
   const ribU =
       c.material === 'psbox'
-        ? Math.max(0.8, psboxLayout(c).bottom - 0.5)
+        ? Math.max(0.8, Math.abs(psboxLayout(c).centres[0]) + (psboxLayout(c).count > 1 ? 0 : psboxLayout(c).bottom - 0.5))
         : c.material === 'slab'
           ? Math.max(1, half * 0.62)
           : Math.max(0.8, half - c.overhang),
