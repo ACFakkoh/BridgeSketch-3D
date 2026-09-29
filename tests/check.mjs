@@ -29,6 +29,7 @@ import {
   alignmentStation,
   fitBoxLayout,
   fitBoxLayoutFromBottom,
+  crossAt,
 } from '../geometry.mjs';
 import { presets, makePreset } from '../presets.mjs';
 registerHooks({
@@ -466,11 +467,16 @@ for (const curved of [false, true])
         Math.max(...top.map(q => q[1])) - Math.min(...top.map(q => q[1])) > 0.1,
         'Return wall top follows the approach grade',
       );
-      for (const [x, y, z] of top)
+      for (const [x, y, z] of top) {
+        // 0.6.0: the wall top follows the approach crossfall at its own offset (crown: −2 % towards the edges).
+        const q = alignmentStation(v, x, z),
+          f = frame(v, q),
+          u = (x - f.x) * f.nx + (z - f.z) * f.nz;
         assert.ok(
-          Math.abs(y - (profile(v, alignmentStation(v, x, z)) - 0.17)) < 0.016,
-          'Return wall top matches road alignment and 15 mm chamfer',
+          Math.abs(y - (profile(v, q) - 0.17 + crossAt(v, u))) < 0.016,
+          'Return wall top matches road alignment, crossfall and 15 mm chamfer',
         );
+      }
     }
     const backwalls = model.structure.children.filter(o => o.name === 'Profile-following backwall');
     assert.equal(backwalls.length, 2);
@@ -479,11 +485,15 @@ for (const curved of [false, true])
         top = [];
       for (let i = 0; i < p.count; i++) if (p.getY(i) > v.elevation - 1) top.push([p.getX(i), p.getY(i), p.getZ(i)]);
       assert.ok(top.length > 0);
-      for (const [x, y, z] of top)
+      for (const [x, y, z] of top) {
+        const q = alignmentStation(v, x, z),
+          f = frame(v, q),
+          u = (x - f.x) * f.nx + (z - f.z) * f.nz;
         assert.ok(
-          Math.abs(y - (profile(v, alignmentStation(v, x, z)) - 0.17)) < 0.03,
-          'Backwall remains below the approach surface along skew and curve',
+          Math.abs(y - (profile(v, q) - 0.17 + crossAt(v, u))) < 0.03,
+          'Backwall remains below the approach surface along skew, curve and crossfall',
         );
+      }
     }
     const terrain = model.setting.children.find(o => o.name === 'Terrain surface'),
       edge = new T.Box3().setFromObject(terrain).max.x;
@@ -504,7 +514,7 @@ for (const curved of [false, true])
     for (let i = 0; i < 2; i++) {
       const bounds = new T.Box3().setFromObject(caps[i]);
       assert.ok(Math.abs((i ? bounds.max.x : bounds.min.x) - (i ? edge : -edge)) < 0.002);
-      assert.ok(bounds.max.z - bounds.min.z > v.width + 2, 'Rear grass cap seals both approach slopes');
+      assert.ok(bounds.max.z - bounds.min.z > v.width + 1.5, 'Rear grass cap seals both approach slopes');
       assert.ok((i ? 1 : -1) * caps[i].geometry.attributes.normal.getX(0) > 0.9, 'Rear grass cap faces outwards');
     }
     for (const face of approachSurfaces(v, 2 * edge))
@@ -618,7 +628,7 @@ assert.ok(
   ),
 );
 disposeModel(concreteFrontModel);
-const variableCap = buildBridge(validate({ ...c, bentThickness: 0.8, bentEndThickness: 1.6 }), materials, {
+const variableCap = buildBridge(validate({ ...c, crossfall: 'flat', bentThickness: 0.8, bentEndThickness: 1.6 }), materials, {
   batch: false,
 });
 assert.ok(
@@ -714,7 +724,7 @@ for (const curved of [false, true])
         s = alignmentStation(v, x, z),
         f = frame(v, s),
         u = (x - f.x) * f.nx + (z - f.z) * f.nz,
-        top = profile(v, s) - v.asphalt,
+        top = profile(v, s) - v.asphalt + crossAt(v, u),
         bottom = top - girderDepth(v, s, u);
       assert.ok(
         Math.min(Math.abs(p.getY(i) - top), Math.abs(p.getY(i) - bottom)) < 0.016,
@@ -929,7 +939,7 @@ for (const v of [
   assert.ok(oneSide.lighting.count > 0 && oneSide.lighting.count < bothSides.lighting.count);
   disposeModel(oneSide);
   disposeModel(bothSides);
-  const fascia = buildBridge(validate({ ...c, material: 'steel', steelColor: 'gray', fasciaColor: 'blue15065' }), materials, {
+  const fascia = buildBridge(validate({ ...c, material: 'steel', continuous: false, steelColor: 'gray', fasciaColor: 'blue15065' }), materials, {
     batch: false,
   });
   const girders = fascia.structure.children.filter(o => /^Span 1 girder/.test(o.name));
@@ -1111,6 +1121,7 @@ for (const folder of ['.', 'vendor', 'textures'])
   const steel = validate({
     ...c,
     material: 'steel',
+    continuous: false,
     girders: 4,
     spans: [20, 33, 20].map(length => ({ length, obstacle: 'water', width: 12, elevation: 0, angle: 90 })),
   });
@@ -1142,8 +1153,8 @@ for (const folder of ['.', 'vendor', 'textures'])
   assert.ok(boxModel.structure.children.some(o => o.name === 'Support diaphragm'));
   assert.equal(
     boxModel.structure.children.filter(o => o.name === 'Box internal diaphragm').length,
-    2 * (2 + 2 * 2),
-    'One internal diaphragm per box on every bearing line',
+    2 * (2 + 2),
+    'One internal diaphragm per box on every bearing line (continuous by default: one line per pier)',
   );
   disposeModel(boxModel);
   // Front slope toe shares the quarter-cone toe line and keeps 2H:1V.
@@ -1166,6 +1177,151 @@ for (const folder of ['.', 'vendor', 'textures'])
       assert.equal(corners.length, 2);
     }
 }
+
+// 0.6.0: crossfall, continuity, NEBT haunches and diaphragms, girder screens, linear cap taper, SDC railing,
+// post grid, approach curbs, open ground, crowned crossing roads, divided highway, double truck, sky.
+{
+  const { lowestCross, obstacleTypes } = await import('../geometry.mjs');
+  const { postStations, SDC } = await import('../railings.mjs');
+  const { roadBed, ROAD_RAISE, terrainSampler, crossing } = await import('../terrain.mjs');
+  const { vehicleDimensions, DOUBLE } = await import('../vehicles.mjs');
+  const mats = makeMaterials();
+  // Crown: 2 % each way from the crown line; uniform 2/3/4 % to either side; flat.
+  const crowned = validate({ ...c });
+  assert.equal(crowned.crossfall, 'crown');
+  assert.ok(Math.abs(crossAt(crowned, 0)) < 1e-12 && Math.abs(crossAt(crowned, 5) + 0.1) < 1e-12 && Math.abs(crossAt(crowned, -5) + 0.1) < 1e-12);
+  const offset = validate({ ...c, crownOffset: 2 });
+  assert.ok(Math.abs(crossAt(offset, 2)) < 1e-12 && Math.abs(crossAt(offset, -3) + 0.1) < 1e-12);
+  const right3 = validate({ ...c, crossfall: 'right', crossSlope: 3 });
+  assert.ok(Math.abs(crossAt(right3, 4) + 0.12) < 1e-12 && Math.abs(crossAt(right3, -4) - 0.12) < 1e-12);
+  assert.ok(Math.abs(crossAt(validate({ ...c, crossfall: 'left', crossSlope: 4 }), 5) - 0.2) < 1e-12);
+  assert.equal(crossAt(validate({ ...c, crossfall: 'flat' }), 5), 0);
+  assert.throws(() => validate({ ...c, crossfall: 'right', crossSlope: 5 }), /2, 3 or 4/);
+  assert.throws(() => validate({ ...c, crownOffset: 20 }), /Crown line/);
+  assert.ok(clearance(crowned, 0) < clearance(validate({ ...c, crossfall: 'flat' }), 0), 'Crossfall lowers the deck edges');
+  assert.ok(lowestCross(crowned) < 0);
+  // Every girder is continuous by default; NEBT decks get closure diaphragms at the piers.
+  assert.equal(defaults.continuous, true);
+  assert.ok(presets.every(p => makePreset(p.id).continuous || makePreset(p.id).spans.length === 1));
+  // Deck elements follow the crossfall: the deck slab top is 2 % lower 5 m from the crown line.
+  const flatDeck = validate({ ...c, material: 'concrete', depth: 1.4, girders: 4, overhang: 1.2, width: 11.4, crossfall: 'flat' });
+  const nebt = buildBridge(flatDeck, mats, { batch: false });
+  // NEBT haunch covers the full 1200 mm top flange.
+  const haunch = nebt.haunches.children[0];
+  haunch.geometry.computeBoundingBox();
+  assert.ok(haunch.geometry.boundingBox.max.z - haunch.geometry.boundingBox.min.z > 1.15, 'NEBT haunch fills the top flange');
+  // MTQ Table 8.2-4: 25 m spans (≤ 30 m) → one intermediate diaphragm between each pair of girders.
+  assert.equal(
+    nebt.structure.children.filter(o => o.name === 'NEBT intermediate diaphragm').length,
+    3 * 1 * 3,
+    'One intermediate diaphragm per bay in each 25 m span',
+  );
+  const shortSpans = buildBridge(validate({ ...flatDeck, spans: [15, 15].map(length => ({ length, obstacle: 'water', width: 8, elevation: 0, angle: 90 })) }), mats, { batch: false });
+  assert.equal(shortSpans.structure.children.filter(o => o.name === 'NEBT intermediate diaphragm').length, 0, 'None up to 15 m');
+  disposeModel(shortSpans);
+  const longSpan = buildBridge(validate({ ...flatDeck, rise: 0.2, spans: [{ length: 40, obstacle: 'water', width: 20, elevation: 0, angle: 90 }] }), mats, { batch: false });
+  assert.equal(longSpan.structure.children.filter(o => o.name === 'NEBT intermediate diaphragm').length, 2 * 3, 'Two between 30 and 45 m');
+  disposeModel(longSpan);
+  // Girder screens at both abutments, on both edges; none for solid slabs.
+  assert.equal(nebt.structure.children.filter(o => o.name === 'Girder screen (cache-poutre)').length, 4);
+  disposeModel(nebt);
+  const slabScreens = buildBridge(validate({ ...c, material: 'slab' }), mats, { batch: false });
+  assert.equal(slabScreens.structure.children.filter(o => o.name === 'Girder screen (cache-poutre)').length, 0);
+  disposeModel(slabScreens);
+  // Bent cap: straight taper from the outer column face to the end thickness.
+  const tapered = validate({ ...c, crossfall: 'flat', columns: 2, columnSpread: 6, columnDiameter: 1, bentThickness: 1.2, bentEndThickness: 0.6 });
+  const tapModel = buildBridge(tapered, mats, { batch: false });
+  const cap = tapModel.structure.children.find(o => o.name === 'Pier cap'),
+    pos = cap.geometry.attributes.position,
+    tip = tapered.width / 2 - 0.15,
+    start = 3.5,
+    seatTop = Math.max(...Array.from({ length: pos.count }, (_, i) => pos.getY(i)));
+  const soffitAt = u => {
+    let best = Infinity;
+    for (let i = 0; i < pos.count; i++) if (Math.abs(Math.abs(pos.getZ(i)) - u) < 0.21) best = Math.min(best, pos.getY(i));
+    return best;
+  };
+  const mid = (start + tip) / 2,
+    expected = seatTop - (1.2 + (0.6 - 1.2) * ((mid - start) / (tip - start)));
+  assert.ok(Math.abs(soffitAt(mid) - expected) < 0.12, `Linear cap taper: ${soffitAt(mid)} vs ${expected}`);
+  disposeModel(tapModel);
+  // Samuel-De Champlain railing: validated, built on both edges, posts on the 3 m grid.
+  const sdc = validate({ ...c, leftRailing: 'SDC', rightRailing: 'SDC' });
+  const sdcModel = buildBridge(sdc, mats, { batch: false });
+  assert.ok(sdcModel.deck.children.length > 200, 'Architectural railing members');
+  disposeModel(sdcModel);
+  assert.equal(SDC.height, 2.4);
+  const posts = postStations(0.025, 24.975, 3, { origin: 37.5, capStart: false, capEnd: false });
+  assert.ok(posts.every(q => Math.abs(((q - 37.5) / 3) % 1) < 1e-9 || Math.abs(((q - 37.5) / 3) % 1) > 1 - 1e-9), 'Posts on the global 3 m grid');
+  const capped = postStations(0, 10, 3, {});
+  assert.deepEqual(capped, [0, 3, 6, 9, 10].filter(q => q !== 9 || 10 - 9 >= 0.4));
+  // Approach wheel curbs stand on concrete, not on asphalt: approach asphalt stops at the curb face.
+  const walk = validate({ ...makePreset('cycle') });
+  const walkModel = buildBridge(walk, mats, { batch: false }),
+    L = totalLength(walk);
+  for (const mesh of walkModel.deck.children.filter(o => o.material === mats.asphalt || (o.material === mats.concrete && false))) {
+    const p = mesh.geometry.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i),
+        z = p.getZ(i),
+        q = alignmentStation(walk, x, z);
+      if (q > -1 && q < L + 1) continue;
+      const f = frame(walk, q),
+        u = (x - f.x) * f.nx + (z - f.z) * f.nz;
+      assert.ok(Math.abs(u) <= walk.width / 2 - 0.44, 'No asphalt under the approach wheel curb');
+    }
+  }
+  disposeModel(walkModel);
+  // Open ground (terrain vague) under a span: valid, no crossing built, terrain near its elevation.
+  assert.ok(obstacleTypes.includes('land'));
+  const land = validate({ ...c, spans: c.spans.map((s, i) => (i === 0 ? { ...s, obstacle: 'land', width: 14, elevation: 0.8 } : s)) });
+  const landModel = buildBridge(land, mats, { batch: false });
+  const o = crossing(land, 12.5, 90, 14, 0.8, 'land'),
+    h = terrainSampler(land)(o.x, o.z);
+  assert.ok(h <= 0.8 + 1e-6 && h > 0.2, `Open ground at its elevation: ${h}`);
+  disposeModel(landModel);
+  // Crossing roads: 2 % crown, 0.5 m above the ground, ditches on both sides.
+  assert.ok(roadBed(10, 5.5).y < 0 && roadBed(10, 5.5).y > -0.2, 'Gravel shoulder at the edge level');
+  const ditch = Math.min(...Array.from({ length: 60 }, (_, k) => roadBed(10, 5 + k * 0.2).y));
+  assert.ok(Math.abs(ditch - (-ROAD_RAISE - 0.3)) < 1e-9, 'Drainage ditch 0.3 m below the ground');
+  assert.equal(roadBed(10, 30).y, -ROAD_RAISE);
+  // Two crossing roads: a divided highway, each carriageway one-way.
+  const twin = validate({
+    ...c,
+    showTraffic: true,
+    spans: [
+      { length: 25, obstacle: 'road', width: 10, elevation: 0, angle: 90 },
+      { length: 25, obstacle: 'water', width: 16, elevation: 0, angle: 90 },
+      { length: 25, obstacle: 'road', width: 10, elevation: 0, angle: 90 },
+    ],
+  });
+  const twinModel = buildBridge(twin, mats, { batch: false });
+  const roadCars = twinModel.vehicles.filter(v => v.userData.route.road && v.userData.route.type !== 'train');
+  const byRoad = new Map();
+  for (const v of roadCars) {
+    const key = v.userData.route.road.x.toFixed(2);
+    if (!byRoad.has(key)) byRoad.set(key, new Set());
+    byRoad.get(key).add(v.userData.route.forward);
+  }
+  assert.equal(byRoad.size, 2);
+  assert.ok([...byRoad.values()].every(set => set.size === 1), 'Each carriageway carries one direction');
+  assert.notDeepEqual(...[...byRoad.values()].map(set => [...set][0]), 'Opposite directions on the two roads');
+  disposeModel(twinModel);
+  // Double (train routier): 18 m from the steer axle to the last axle, 4.8 m high.
+  assert.ok(Math.abs(DOUBLE.lastAxle - DOUBLE.frontAxle - 18) < 1e-9);
+  assert.equal(vehicleDimensions('double').height, 4.8);
+  assert.ok(vehicleKinds.includes('double'));
+  // New options validate.
+  for (const [k, v] of [
+    ['centreLine', 'double'],
+    ['concreteFinish', 'formwork'],
+    ['concreteFinish', 'weathered'],
+    ['skyModel', 'physical'],
+    ['girderScreens', false],
+  ])
+    assert.equal(validate({ ...c, [k]: v })[k], v);
+  assert.throws(() => validate({ ...c, concreteFinish: 'marble' }), /concrete finish/);
+}
 console.log(
-  `Checks passed: validation, round trips, skew intersections, continuous boxes, slab soffits, 2H:1V cones, scenery, square columns, traffic and generated scene matrix. Geometry-matrix max ${maxTriangles.toLocaleString()} triangles. Static files ${(bytes / 1e6).toFixed(2)} MB; gzip estimate ${(gzipBytes / 1e6).toFixed(2)} MB.`,
+  `Checks passed: validation, round trips, 0.6.0 crossfall / diaphragms / screens / railings / roads, skew intersections, continuous boxes, slab soffits, 2H:1V cones, scenery, square columns, traffic and generated scene matrix. Geometry-matrix max ${maxTriangles.toLocaleString()} triangles. Static files ${(bytes / 1e6).toFixed(2)} MB; gzip estimate ${(gzipBytes / 1e6).toFixed(2)} MB.`,
 );

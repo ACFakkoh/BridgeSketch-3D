@@ -3,7 +3,7 @@ import { mergeGeometries } from './vendor/BufferGeometryUtils.js';
 import data from './models/vehicles-data.mjs';
 
 // Kenney Car Kit 3.1, CC0; offline meshes with dedicated automotive materials.
-export const vehicleKinds = Object.freeze(['sedan', 'suv', 'hatchback', 'pickup', 'van', 'truck', 'semi']);
+export const vehicleKinds = Object.freeze(['sedan', 'suv', 'hatchback', 'pickup', 'van', 'truck', 'semi', 'double']);
 const surface = (color, roughness = 0.5, metalness = 0) => new T.MeshStandardMaterial({ color, roughness, metalness });
 const finishes = {
   paint: surface('#2e6484', 0.28, 0.32),
@@ -20,6 +20,11 @@ finishes.headlamp.emissive.set('#ffdf9d');
 finishes.headlamp.emissiveIntensity = 0.16;
 finishes.taillamp.emissive.set('#a52310');
 finishes.taillamp.emissiveIntensity = 0.15;
+// Night driving (0.6.0): headlamps and tail lamps glow after dusk (emissive only: no extra lights or passes).
+export function setVehicleLights(level) {
+  finishes.headlamp.emissiveIntensity = 0.16 + 3.2 * level;
+  finishes.taillamp.emissiveIntensity = 0.15 + 2.4 * level;
+}
 const cyclistFinishes = {
   skin: surface('#bb8865', 0.87),
   trousers: surface('#263d52', 0.88),
@@ -30,7 +35,12 @@ const templates = new Map();
 
 export function vehicleDimensions(type) {
   if (type === 'cyclist') return { length: 1.75, width: 0.68, height: 1.8, halfLength: 0.95, halfWidth: 0.37 };
-  const d = type === 'semi' ? { length: 13.3, width: 2.74, height: 3.78 } : data[type === 'car' ? 'sedan' : type];
+  const d =
+    type === 'semi'
+      ? { length: 13.3, width: 2.74, height: 3.78 }
+      : type === 'double'
+        ? { length: DOUBLE.length, width: 2.6, height: DOUBLE.height }
+        : data[type === 'car' ? 'sedan' : type];
   if (!d) throw new Error(`Unknown vehicle: ${type}`);
   return {
     length: d.length,
@@ -64,8 +74,85 @@ function modelParts(type) {
   return templates.get(type);
 }
 
+// Double (train routier, 0.6.0): long-nose tractor with sleeper and two 8.2 m pup trailers joined by a converter
+// dolly; 18.0 m from the steer axle to the last axle, 4.8 m from the asphalt to the top of the trailers.
+export const DOUBLE = { length: 21.6, height: 4.8, frontAxle: 1.3, lastAxle: 19.3 };
+function createDoubleModel(group, paint, material) {
+  const L = DOUBLE.length,
+    x = d => L / 2 - d; // distance from the front bumper → local x (+X forward)
+  const add = (name, geometry, mat, px, py, pz) => {
+    const mesh = new T.Mesh(geometry, mat);
+    mesh.name = name;
+    mesh.position.set(px, py, pz);
+    mesh.castShadow = mesh.receiveShadow = true;
+    group.add(mesh);
+    return mesh;
+  };
+  const box = (name, mat, d0, d1, y0, y1, w, z = 0) =>
+    add(name, new T.BoxGeometry(d1 - d0, y1 - y0, w), mat, x((d0 + d1) / 2), (y0 + y1) / 2, z);
+  const wheel = (d, z, dual = false) => {
+    const r = 0.52,
+      t = dual ? 0.56 : 0.3;
+    const tyre = add('Tyre', new T.CylinderGeometry(r, r, t, 18), material('rubber'), x(d), r, z);
+    tyre.rotation.x = Math.PI / 2;
+    const rim = add('Wheel rim', new T.CylinderGeometry(0.3, 0.3, t + 0.01, 14), material('metal'), x(d), r, z + Math.sign(z) * 0.005);
+    rim.rotation.x = Math.PI / 2;
+  };
+  // Tractor: bumper, long hood, cab, sleeper with roof fairing, tanks, stacks, mirrors.
+  box('Front bumper', material('metal'), 0, 0.35, 0.45, 0.85, 2.5);
+  box('Grille', material('trim'), 0.3, 0.45, 0.85, 1.95, 1.2);
+  box('Hood', paint, 0.35, 2.55, 0.95, 1.95, 2.05);
+  for (const z of [-1.1, 1.1]) {
+    box('Fender', paint, 0.6, 2.2, 0.75, 1.25, 0.35, z);
+    box('Headlamp', material('headlamp'), 0.32, 0.4, 1.35, 1.55, 0.35, z * 0.8);
+    box('Fuel tank', material('metal'), 3.4, 4.9, 0.55, 1.15, 0.55, z * 1.02);
+    add('Exhaust stack', new T.CylinderGeometry(0.08, 0.08, 2.6, 8), material('metal'), x(4.55), 3.0, z * 1.05);
+    box('Mirror', material('trim'), 2.35, 2.45, 2.3, 2.75, 0.12, z * 1.35);
+  }
+  box('Cab', paint, 2.55, 4.3, 0.95, 3.15, 2.45);
+  box('Windshield', material('glass'), 2.5, 2.62, 2.15, 3.0, 2.2);
+  for (const z of [-1.23, 1.23]) box('Side window', material('glass'), 2.8, 3.6, 2.15, 2.85, 0.02, z);
+  box('Sleeper', paint, 4.3, 6.0, 0.95, 3.55, 2.45);
+  box('Roof fairing', paint, 3.4, 6.0, 3.15, 4.25, 2.3);
+  box('Chassis', material('trim'), 0.4, 7.4, 0.55, 0.85, 1.0);
+  box('Fifth wheel', material('trim'), 5.9, 7.1, 0.95, 1.12, 1.9);
+  // Trailer 1 (5.2–13.4) on the fifth wheel, converter dolly with draw bar, trailer 2 (13.4–21.6).
+  const trailer = (d0, d1, axle) => {
+    box('Dry-van trailer', material('cargo'), d0, d1, 1.25, DOUBLE.height, 2.6);
+    box('Trailer chassis', material('trim'), d0 + 0.1, d1 - 0.1, 1.02, 1.25, 1.9);
+    for (const z of [-1.301, 1.301]) {
+      box('Trailer livery', paint, d0 + 0.3, d1 - 0.3, 1.45, 1.6, 0.02, z);
+      for (let d = d0 + 0.8; d < d1 - 0.3; d += 1.2) box('Side marker', material('amber'), d, d + 0.1, 1.33, 1.4, 0.03, z * 1.005);
+      box('Tail lamp', material('taillamp'), d1 - 0.02, d1 + 0.01, 1.3, 1.46, 0.34, z * 0.7);
+      wheel(axle - 0.6, z * 0.92, true);
+      wheel(axle + 0.6, z * 0.92, true);
+    }
+    box('Rear door seam', material('trim'), d1 - 0.01, d1 + 0.01, 1.3, DOUBLE.height - 0.05, 0.03);
+    box('Underrun bar', material('metal'), d1 - 0.25, d1 - 0.1, 0.5, 0.66, 2.1);
+  };
+  trailer(5.2, 13.4, 12.2);
+  box('Dolly draw bar', material('trim'), 13.4, 14.5, 0.62, 0.72, 0.25);
+  box('Dolly frame', material('trim'), 14.0, 15.3, 0.75, 1.0, 1.9);
+  trailer(13.4, 21.6, DOUBLE.lastAxle - 0.6);
+  for (const z of [-1.08, 1.08]) {
+    wheel(DOUBLE.frontAxle, z);
+    wheel(5.9, z * 0.92, true);
+    wheel(7.2, z * 0.92, true);
+    wheel(14.65, z * 0.92, true);
+  }
+}
+
 export function createVehicleModel(type, paintMaterial, materials = {}) {
   if (type === 'cyclist') return createCyclistModel(paintMaterial);
+  if (type === 'double') {
+    const group = new T.Group(),
+      paint = paintMaterial ?? finishes.paint,
+      material = name => (name === 'paint' ? paint : (materials[`vehicle_${name}`] ?? finishes[name]));
+    group.name = 'double';
+    group.userData = { ...vehicleDimensions('double'), source: 'BridgeSketch 3D procedural double', units: 'metres', forwardAxis: '+X' };
+    createDoubleModel(group, paint, material);
+    return group;
+  }
   if (type === 'car') type = 'sedan';
   const dimensions = vehicleDimensions(type),
     group = new T.Group(),

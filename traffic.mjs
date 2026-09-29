@@ -1,7 +1,7 @@
 // BridgeSketch 3D · Vehicles, trains and cyclists: placement and animation.
 import * as T from 'three';
 import { createVehicleModel, vehicleDimensions } from './vehicles.mjs';
-import { frame, profile, totalLength, vehicleFits } from './geometry.mjs';
+import { crossAt, frame, profile, totalLength, vehicleFits } from './geometry.mjs';
 
 export function vehicle(parent, m, c, s, u, type, forward = true, road) {
   if (!c.showTraffic) return;
@@ -44,7 +44,9 @@ export function positionVehicle(group, c) {
   const f = road
     ? { x: road.x + road.dx * s + road.nx * u, z: road.z + road.dz * s + road.nz * u, tx: road.dx, tz: road.dz }
     : frame(c, s, u);
-  group.position.set(f.x, (road ? road.elevation : profile(c, s)) + 0.025 + verticalOffset, f.z);
+  // Deck vehicles ride on the crossfall; crossing-road vehicles on the 2 % crown (not trains on their ballast).
+  const lift = road ? (group.userData.route.type === 'train' ? 0 : -0.02 * Math.abs(u)) : crossAt(c, u);
+  group.position.set(f.x, (road ? road.elevation : profile(c, s)) + lift + 0.025 + verticalOffset, f.z);
   group.rotation.set(
     0,
     -Math.atan2(f.tz, f.tx) + (forward ? 0 : Math.PI),

@@ -46,6 +46,53 @@ const withClouds = material => {
   return material;
 };
 
+// Concrete finish (0.6.0): 0 rough (Poly Haven maps), 1 smooth formwork (1.2 × 2.4 m plywood panel joints and tie
+// holes on 0.6 m centres, smoother and lighter), 2 weathered (runoff streaks from the top edges, darker patina,
+// lichen blotches). Procedural in the fragment shader, in world metres: no extra textures, a few ALU per pixel.
+export const concreteFinish = { value: 0 };
+const FINISH_PARS = `varying vec3 finishWorld;varying vec3 finishNormal;uniform float concreteFinish;
+float finishHash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float finishNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(finishHash(i),finishHash(i+vec2(1,0)),f.x),mix(finishHash(i+vec2(0,1)),finishHash(i+vec2(1,1)),f.x),f.y);}`;
+const FINISH_COLOR = `
+if(concreteFinish>.5){
+  vec3 n=normalize(finishNormal);
+  vec2 t=normalize(vec2(-n.z,n.x)+1e-5);
+  bool wall=abs(n.y)<.6;
+  // Face coordinates in metres: along the face and up for walls, plan coordinates for soffits and tops.
+  vec2 q=wall?vec2(dot(finishWorld.xz,t),finishWorld.y):finishWorld.xz;
+  if(concreteFinish<1.5){
+    vec2 panel=q/vec2(2.4,1.2);
+    vec2 edge=min(fract(panel),1.-fract(panel))*vec2(2.4,1.2);
+    float joint=1.-smoothstep(.004,.012,min(edge.x,edge.y));
+    vec2 tie=fract(q/.6+.5)-.5;
+    float hole=1.-smoothstep(.012,.022,length(tie*.6));
+    float tone=finishNoise(floor(panel)*1.7+3.)*.08+finishNoise(q*1.3)*.04;
+    diffuseColor.rgb*=1.06+tone-.06;
+    diffuseColor.rgb*=1.-.28*joint-.45*hole;
+  }else{
+    float streak=finishNoise(vec2(q.x*3.1,q.y*.18))*finishNoise(vec2(q.x*9.,q.y*.5+4.));
+    float runoff=wall?smoothstep(.18,.5,streak):0.;
+    float patina=finishNoise(q*.35)*.6+finishNoise(q*1.7)*.4;
+    float lichen=smoothstep(.72,.82,finishNoise(q*.9+11.))*(wall?1.:.4);
+    diffuseColor.rgb*=mix(.9,.72,patina*.6);
+    diffuseColor.rgb*=1.-.3*runoff;
+    diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*vec3(.86,.92,.72),lichen*.6);
+  }
+}`;
+// Adds the finish to a concrete material's shader (world position and normal varyings, shared uniform).
+function withFinish(shader) {
+  shader.uniforms.concreteFinish = concreteFinish;
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 finishWorld;varying vec3 finishNormal;')
+    .replace(
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\nfinishWorld=(modelMatrix*vec4(transformed,1.)).xyz;finishNormal=normalize(mat3(modelMatrix)*objectNormal);',
+    );
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\n' + FINISH_PARS)
+    .replace('#include <color_fragment>', '#include <color_fragment>\n' + FINISH_COLOR);
+}
+
 export function makeMaterials(onLoad = () => {}) {
   const material = (color, roughness = 0.85, metalness = 0) =>
     new T.MeshStandardMaterial({ color, roughness, metalness });
@@ -57,6 +104,8 @@ export function makeMaterials(onLoad = () => {}) {
     dark: material('#253037', 0.65, 0.15),
     railing: material('#9ba6a6', 0.62, 0.7),
     guardrail: material('#9da6a1', 0.55, 0.75),
+    // Samuel-De Champlain architectural railing: white-grey satin paint.
+    sdc: material('#d6dad8', 0.45, 0.05),
     reflector: material('#f0c84c', 0.4, 0.1),
     grass: material('#839873'),
     grassBlade: material('#4d8052'),
@@ -366,8 +415,11 @@ float steelNoise(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(m
   };
   {
     const stain = m.concrete.userData.stain;
-    m.concrete.customProgramCacheKey = () => 'bridgesketch-concrete-055';
+    m.concrete.customProgramCacheKey = () => 'bridgesketch-concrete-060';
+    m.edge.customProgramCacheKey = () => 'bridgesketch-edge-060';
+    m.edge.onBeforeCompile = withFinish;
     m.concrete.onBeforeCompile = shader => {
+      withFinish(shader);
       shader.uniforms.stainLevel = stain.level;
       shader.uniforms.stainCentre = stain.centre;
       shader.uniforms.stainAlong = stain.along;

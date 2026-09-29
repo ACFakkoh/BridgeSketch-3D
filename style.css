@@ -1172,3 +1172,157 @@ body.dock-bottom .variant-label {
 .time-play[aria-pressed='false'] {
   color: #d4e5e9;
 }
+
+/* 0.6.0 · camera icon on the snapshot button */
+#image .icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  vertical-align: -3px;
+}
+
+/* 0.6.0 · Phones and small tablets: the 3D view on top (full width, fixed aspect), parameters below in the page
+   flow; overlays become compact rows that scroll sideways instead of overlapping the model. */
+@media (max-width: 760px), (max-height: 500px) and (orientation: landscape) {
+  body {
+    min-width: 0;
+  }
+  .topbar {
+    height: 52px;
+    padding: 0 12px;
+  }
+  .brand img {
+    width: 32px;
+    height: 32px;
+  }
+  .brand h1 {
+    font-size: 1.2rem;
+  }
+  .brand small,
+  .release-info {
+    display: none;
+  }
+  .workspace,
+  body.dock-bottom .workspace {
+    height: auto;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    gap: 8px;
+    padding: 8px;
+  }
+  #viewport,
+  body.dock-bottom #viewport {
+    grid-row: 1;
+    height: min(66svh, 128vw);
+    min-height: 300px;
+  }
+  .sidebar,
+  body.dock-bottom .sidebar {
+    grid-row: 2;
+    max-height: none;
+    overflow: visible;
+  }
+  #dock {
+    display: none;
+  }
+  .view-heading {
+    top: 10px;
+    left: 12px;
+    right: 150px;
+  }
+  .view-heading h2 {
+    font-size: 1.05rem;
+    margin: 2px 0;
+  }
+  .view-heading p,
+  .eyebrow,
+  .navigation-hint {
+    display: none;
+  }
+  .view-tools,
+  .view-options,
+  .export-tools {
+    left: 8px;
+    right: 8px;
+    top: auto;
+    overflow-x: auto;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
+  }
+  .view-tools::-webkit-scrollbar,
+  .view-options::-webkit-scrollbar,
+  .export-tools::-webkit-scrollbar {
+    display: none;
+  }
+  .view-tools {
+    bottom: 8px;
+    justify-content: space-between;
+  }
+  .view-tools button {
+    padding: 8px 9px;
+    flex: 0 0 auto;
+  }
+  .view-options {
+    bottom: 58px;
+    gap: 4px;
+  }
+  .view-options label {
+    flex: 0 0 auto;
+    padding: 7px 8px;
+    font-size: 0.72rem;
+  }
+  .export-tools {
+    bottom: 100px;
+    justify-content: flex-end;
+  }
+  .export-tools > button,
+  .export-tools summary {
+    flex: 0 0 auto;
+  }
+  #model-info {
+    display: none;
+  }
+  .time-control {
+    top: 8px;
+    right: 8px;
+    left: auto;
+    bottom: auto;
+    width: 140px;
+    padding: 6px 8px;
+  }
+  .time-control label {
+    font-size: 0.7rem;
+  }
+  .section-view .view-options,
+  .section-view .export-tools {
+    display: none;
+  }
+  .perf-hud {
+    bottom: 142px;
+  }
+  #feedback {
+    left: 8px;
+    right: 8px;
+    max-width: none;
+  }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  #viewport,
+  body.dock-bottom #viewport {
+    height: calc(100svh - 68px);
+  }
+}
+
+/* 0.6.0 · Soft cinematic vignette over the 3D view: pure CSS, no GPU pass. */
+#canvasHost::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 48%, transparent 58%, rgba(8, 20, 32, 0.26) 100%);
+}
+body.background-white #canvasHost::after,
+.section-view #canvasHost::after {
+  display: none;
+}

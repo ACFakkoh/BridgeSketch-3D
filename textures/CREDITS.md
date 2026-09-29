@@ -26,3 +26,6 @@ Both source pages mark the textures as [CC0 1.0](https://creativecommons.org/pub
 - `leaf-oak.webp`, `leaf-ash.webp`, `leaf-aspen.webp`: EZ-Tree leaf cards (MIT, Daniel Greenheck, https://github.com/dgreenheck/ez-tree), resized.
 - `ballast.webp`: procedural crushed-stone texture generated for BridgeSketch 3D (NumPy Voronoi), no third-party source.
 - Tree generator code: `vendor/ez-tree/` (MIT, see `vendor/ez-tree/LICENSE.txt`), imports adapted for offline ES modules.
+- Starfield (sky.mjs): approach and blackbody colour formula adapted from CK42BB/procedural-stars-threejs (MIT, © 2026 Kingsley); written for BridgeSketch 3D, no assets copied.
+- Grass species (grass.mjs): blade and species profiles adapted from CK42BB/procedural-grass-threejs (MIT, © 2026 Kingsley).
+- Physical sky option (sky.mjs): Preetham analytic daylight after Tw1ddle/Sky-Shader (MIT, © 2015 Sam Twidale) and the three.js Sky object (MIT; Simon Wallner, Martin Upitis, zz85).

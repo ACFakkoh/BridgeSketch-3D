@@ -3,7 +3,7 @@
 // Cost control: light pools and glows are additive decals (visible in the water reflection); only a
 // handful of real point lights are added, so the shader cost stays bounded whatever the lamp count.
 import * as T from 'three';
-import { frame, profile, supportStation, totalLength } from './geometry.mjs';
+import { crossAt, frame, profile, supportStation, totalLength } from './geometry.mjs';
 import { box } from './sections.mjs';
 import { mergeGeometries } from './vendor/BufferGeometryUtils.js';
 import { barrierHeight, isConcrete, CURB_HEIGHT } from './deck-profiles.mjs';
@@ -116,7 +116,7 @@ export function buildLighting(c, m, ranges) {
   const onDeck = (s, u, y) => {
     const q = supportStation(c, s, u),
       f = frame(c, q, u);
-    return { x: f.x, y: profile(c, q) + y, z: f.z, yaw: -Math.atan2(f.tz, f.tx) };
+    return { x: f.x, y: profile(c, q) + crossAt(c, u) + y, z: f.z, yaw: -Math.atan2(f.tz, f.tx) };
   };
   const poles = [];
   if (!handrail) {

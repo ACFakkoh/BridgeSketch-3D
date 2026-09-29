@@ -1,6 +1,6 @@
 // BridgeSketch 3D · Cross-sections and generic solids: swept sections, chamfers, skew-plane plates, walls.
 import * as T from 'three';
-import { frame, profile, stations, supportStation, girderTop, girderDepth } from './geometry.mjs';
+import { crossAt, frame, profile, stations, supportStation, girderTop, girderDepth } from './geometry.mjs';
 
 // NEBT nominal metric geometry: top 1200, bottom 810, web 180 mm.
 // ponytail: small fillets are sampled curves for viewing; shop-detail accuracy needs the owner's exact drawing revision.
@@ -103,7 +103,10 @@ export function chamferSection(points) {
   });
 }
 
-export function sweep(c, a, b, section, mat, height = profile, segments) {
+// crossU: undefined → every vertex follows the deck crossfall at its own u (deck elements are sheared, so their
+// verticals stay vertical); a number → the whole section is lifted rigidly by the crossfall at that u (girders);
+// false → no crossfall (terrain-referenced solids).
+export function sweep(c, a, b, section, mat, height = profile, segments, crossU) {
   const rawSection = typeof section === 'function' ? section : () => section;
   const sectionAt =
     mat.userData.chamfer && height === profile ? station => chamferSection(rawSection(station)) : rawSection;
@@ -123,7 +126,7 @@ export function sweep(c, a, b, section, mat, height = profile, segments) {
     sectionAt(station).map(([u, v]) => {
       const s = supportStation(c, station, u),
         p = frame(c, s, u);
-      return [p.x, height(c, s, v, u) + v, p.z];
+      return [p.x, height(c, s, v, u) + v + (crossU === false ? 0 : crossAt(c, crossU ?? u)), p.z];
     }),
   );
   // Separate section faces keep corners sharp, shared longitudinal vertices smooth the haunch.
@@ -240,7 +243,7 @@ export function boxGirder(c, a, b, u, mat) {
       const d = girderDepth(c, supportStation(c, station, u), u);
       return boxSection(d, c.boxTopWidth, c.boxBottomWidth, 0.05, c.web)[plate].map(([x, y]) => [x + u, y]);
     };
-    const mesh = sweep(c, a, b, section, mat, (_, s) => girderTop(c, 0, s));
+    const mesh = sweep(c, a, b, section, mat, (_, s) => girderTop(c, 0, s), undefined, u);
     mesh.name = 'Box ' + plate;
     group.add(mesh);
   }
@@ -449,7 +452,22 @@ export function profiledSupportWall(parent, mat, c, station, u0, u1, thickness, 
 }
 
 export function soffitAt(c, i, s, u = 0) {
-  return girderTop(c, i, s) - girderDepth(c, s, u);
+  return girderTop(c, i, s) + crossAt(c, u) - girderDepth(c, s, u);
+}
+
+// Plate in the skewed support plane between u0 and u1 whose top and bottom follow the deck crossfall
+// (top(u) / bottom(u) are levels before crossfall). Split at the crown line so every piece stays convex.
+export function crossPlate(parent, mat, c, s, u0, u1, top, bottom, thickness, name) {
+  const cuts = [u0, u1];
+  if (c.crossfall === 'crown' && c.crownOffset > u0 && c.crownOffset < u1) cuts.splice(1, 0, c.crownOffset);
+  const pieces = [];
+  for (let k = 0; k < cuts.length - 1; k++) {
+    const a = cuts[k],
+      b = cuts[k + 1],
+      at = (u, y) => [u, y(u) + crossAt(c, u)];
+    pieces.push(skewPlate(parent, mat, c, s, [at(a, top), at(b, top), at(b, bottom), at(a, bottom)], thickness, name));
+  }
+  return pieces;
 }
 
 export function bearingY(c, i, station, u = 0) {

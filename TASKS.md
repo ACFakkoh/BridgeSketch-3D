@@ -1,6 +1,33 @@
 # BridgeSketch 3D — suivi des travaux
 
-Mise à jour : 2026-09-27. Source de vérité pour les changements locaux et leur état de publication.
+Mise à jour : 2026-09-28. Source de vérité pour les changements locaux et leur état de publication.
+
+## 0.6.0 — demandes Notion « Bridge Sketch 3D fix and features for 0.6 » (local, non publié)
+
+- [x] Mobile : vue 3D en haut (ratio fixe), paramètres dessous, barres compactes défilantes, cadrage adapté.
+- [x] Ciel étoilé procédural selon la seed (≈ 4 200 étoiles, couleurs de corps noir, scintillement, masquées par les nuages) + Voie lactée discrète.
+- [x] Sky-Shader (Preetham) testé : option « Physical »; le ciel stylisé reste par défaut (golden hour mieux maîtrisée, même coût).
+- [x] Herbe : trois espèces (prairie, joncs/quenouilles au bord de l'eau, graminées sèches sur les talus), brins effilés.
+- [x] Terrain vague sous une travée (« Open ground »), raccordé au terrain voisin.
+- [x] Routes franchies : couronne 2 %, chaussée 0,5 m au-dessus du sol, accotements, fossés de drainage.
+- [x] Pont : couronne 2 % de part et d'autre d'une ligne réglable, ou dévers uniforme 2/3/4 %.
+- [x] Poutres continues par défaut (acier, béton).
+- [x] Snapshot : icône appareil photo, rendu haute qualité (jusqu'à 3840 px, ombres 4096), PNG sans perte.
+- [x] Double ligne jaune continue (option).
+- [x] Garde-corps architectural Samuel-De Champlain (2,4 m, incliné vers l'extérieur, barrotins, blanc-gris).
+- [x] Camion train routier : 18 m entre l'essieu avant et le dernier essieu, 4,8 m de haut.
+- [x] Améliorations visuelles peu coûteuses : vignette CSS, oiseaux (1 draw call), phares la nuit, chaussée mouillée sous la pluie.
+- [x] Deux nouvelles textures de béton : coffrage lisse (joints, trous de tiges) et béton vieilli (coulures).
+- [x] NEBT : goussets pleine largeur de semelle (1200 mm).
+- [x] Chasse-roues aux approches : plus d'enrobé sous le chasse-roue.
+- [x] Poteaux des glissières prolongées à 3000 mm (grille unique pont + approches).
+- [x] Chevêtre effilé : effilement linéaire.
+- [x] Glissières du pont prolongées jusqu'au bout des murs en retour.
+- [x] NEBT : diaphragmes intermédiaires en béton (tableau 8.2-4, un par 15 m).
+- [x] Cache-poutres aux culées.
+- [x] Deux routes franchies = autoroute à chaussées séparées, une direction chacune.
+- [x] Vérifications : `node check.mjs` (nouveaux contrôles 0.6.0), captures Chromium/SwiftShader, test du snapshot (2973 × 2232 px), mobile 390 × 844 et 844 × 390.
+- [ ] À valider par Anthony sur son portable et son téléphone : fps (herbe et étoiles), rendu du ciel physique, puis archives et push GitHub.
 
 ## 0.5.6 — demandes du 2026-09-27 (local, non publié)
 

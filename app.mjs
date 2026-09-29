@@ -20,6 +20,8 @@ import {
   supportStation,
   archSpanIndex,
   psboxLayout,
+  crossAt,
+  lowestCross,
 } from './geometry.mjs';
 import { psboxParts } from './systems.mjs';
 import { release } from './release.mjs';
@@ -51,6 +53,8 @@ import {
 import { createPlanarReflection } from './water.mjs';
 import { lightsOn } from './lighting.mjs';
 import { makeWeather } from './weather.mjs';
+import { makeAmbient } from './ambient.mjs';
+import { setVehicleLights } from './vehicles.mjs';
 import { grassUniforms } from './grass.mjs';
 import { cloudShadow } from './materials.mjs';
 import { renderSettings, effectiveQuality, setGpuName, stepDownAuto, gpuInfo } from './quality.mjs';
@@ -73,13 +77,16 @@ let config = makePreset(presets[0].id),
   view = 'perspective',
   pendingCamera;
 let messageTimer,
-  driving = null;
+  driving = null,
+  // Test hook (bridgeViewer.freeze): stop ambient animation so automated captures get a still frame.
+  frozen = false;
 let needsRender = true,
   flowTime = 0,
   lastTime = 0,
   frameMs = 0,
   reflection,
   weather,
+  ambient,
   reflectionMs = 0,
   envDirty = true,
   envAt = 0;
@@ -189,7 +196,7 @@ function refreshForm() {
   $('spanRows').innerHTML = config.spans
     .map(
       (span, i) =>
-        `<section class="span-row" ${i === activeSpan ? '' : 'hidden'}><h3>SPAN ${i + 1}</h3><label>Crossing<select data-span="${i}" data-key="obstacle">${['water', 'road', 'rail'].map(v => `<option value="${v}" ${span.obstacle === v ? 'selected' : ''}>${v === 'rail' ? 'Railway' : v[0].toUpperCase() + v.slice(1)}</option>`).join('')}</select></label><label>Vertical clearance · m<input data-span="${i}" data-key="clearance" type="number" min=".3" max="35" step=".01" value="${clearance(config, i).toFixed(2)}"></label><details><summary>Crossing dimensions</summary><div class="field-grid">${[
+        `<section class="span-row" ${i === activeSpan ? '' : 'hidden'}><h3>SPAN ${i + 1}</h3><label>Crossing<select data-span="${i}" data-key="obstacle">${['water', 'road', 'rail', 'land'].map(v => `<option value="${v}" ${span.obstacle === v ? 'selected' : ''}>${{ water: 'Water', road: 'Road', rail: 'Railway', land: 'Open ground · no crossing' }[v]}</option>`).join('')}</select></label><label>Vertical clearance · m<input data-span="${i}" data-key="clearance" type="number" min=".3" max="35" step=".01" value="${clearance(config, i).toFixed(2)}"></label><details><summary>Crossing dimensions</summary><div class="field-grid">${[
           ['width', 'Width · m', 3, 60],
           ['elevation', 'Elevation · m', -5, 15],
           ['angle', 'Crossing angle · °', 35, 145],
@@ -234,6 +241,11 @@ function syncEnabled() {
     slab = config.material === 'slab',
     system = config.structureSystem;
   $('arch-fields').hidden = system !== 'arch';
+  $('cross-slope-label').hidden = !['left', 'right'].includes(config.crossfall);
+  $('crown-offset-label').hidden = config.crossfall === 'flat';
+  form.elements.crownOffset.min = String(-config.width / 2);
+  form.elements.crownOffset.max = String(config.width / 2);
+  form.elements.girderScreens.disabled = !['concrete', 'steel', 'box'].includes(config.material);
   form.elements.archRise.disabled = config.archType !== 'tied';
   $('strut-fields').hidden = system !== 'strutted';
   // Frames are monolithic concrete: solid slab or prestressed box only.
@@ -381,7 +393,7 @@ function applyTimeOfDay(hour) {
   fill.color.copy(tint('#7293bf', '#c8ddfa', '#ffcfab'));
   fill.intensity = 0.3 + 0.95 * daylight - 0.4 * golden;
   rim.intensity = 0.15 + 0.55 * daylight + 0.15 * golden;
-  sky?.update(daylight, golden, sun);
+  sky?.update(daylight, golden, sun, new T.Vector3(Math.cos(angle) * 80, 80 * elevation, 40));
   if (materials?.water) {
     const w = materials.water.userData.water,
       sunDirection = sun.position.clone().normalize();
@@ -411,6 +423,15 @@ function applyTimeOfDay(hour) {
   cloudShadow.strength.value =
     config.skyMode === 'clouds' || wet ? (wet ? 0.18 : 0.42) * daylight * (1 - 0.6 * golden) : 0;
   weather?.set(config.weather, daylight);
+  // Ambient touches (0.6.0): birds by day, vehicle lamps after dusk, wet (glossier) road and concrete in rain.
+  ambient?.set(config.background === 'white' ? 0 : daylight, golden, config.weather, scene.userData.birdCentre);
+  setVehicleLights(1 - T.MathUtils.smoothstep(daylight, 0.08, 0.45));
+  if (materials) {
+    const rain = config.weather === 'rain';
+    materials.asphalt.roughness = rain ? 0.38 : 0.9;
+    materials.asphalt.envMapIntensity = rain ? 1.6 : 1;
+    materials.concrete.roughness = materials.edge.roughness = rain ? 0.62 : 0.88;
+  }
   // Stylised atmospheric haze: cool by day, peach at golden hour, deep blue at night (option).
   const radius = scene.userData.radius ?? 120,
     hazeColor = config.background === 'white' ? new T.Color('#ffffff') : tint('#141f33', '#b4c7d4', '#e2ae8a');
@@ -505,18 +526,20 @@ function renderSection() {
     ),
   );
   const bottom = c.material === 'slab' ? -deepest - 0.065 : top - deepest;
+  // Deck crossfall: deck parts are drawn sheared (verticals stay vertical), girders are lifted rigidly.
+  const xf = u => crossAt(c, u);
   const svg = $('sectionSvg'),
     svgWidth = Math.max(580, Math.min(1000, svg.clientWidth || 800));
   sectionZoom.width = svgWidth;
   svg.setAttribute('viewBox', sectionViewBox());
   // Drawing band 110–470 px leaves room for the heading, dimension chains and title block.
-  const lo = Math.min(bottom - 1.05, -2),
+  const lo = Math.min(bottom + lowestCross(c) - 1.05, -2),
     hi = 2.75,
     k = Math.min((svgWidth - 60) / (c.width + 2.4), 360 / (hi - lo)),
     cy = 290 + (k * (hi + lo)) / 2;
-  const poly = (points, fill, stroke = '#344a50') =>
-    `<polygon points="${points.map(p => p.join(',')).join(' ')}" fill="${fill}" stroke="${stroke}" stroke-width=".018"/>`;
-  const rectangle = (a, b, t, d, fill) =>
+  const poly = (points, fill, stroke = '#344a50', sheared = true) =>
+    `<polygon points="${points.map(([u, y]) => [u, sheared ? y + xf(u) : y].join(',')).join(' ')}" fill="${fill}" stroke="${stroke}" stroke-width=".018"/>`;
+  const rectangle = (a, b, t, d, fill, sheared = true) =>
     poly(
       [
         [a, t],
@@ -525,6 +548,8 @@ function renderSection() {
         [a, d],
       ],
       fill,
+      undefined,
+      sheared,
     );
   // Concrete outlines carry the same 15 × 15 mm chamfers as the 3D model.
   const concrete = (points, fill) => poly(chamferSection(points), fill);
@@ -556,15 +581,18 @@ function renderSection() {
             : c.material === 'box'
               ? Object.values(boxSection(girderDepthAt, c.boxTopWidth, c.boxBottomWidth, 0.05, c.web))
               : [steelSection(c.depth, c.web).map(([x, y]) => [x, y < -0.05 ? y + c.depth - girderDepthAt : y])];
+      const xg = xf(u);
       for (const section of sections)
         drawing += poly(
-          section.map(([x, y]) => [x + u, y + top]),
+          section.map(([x, y]) => [x + u, y + top + xg]),
           c.material === 'concrete'
             ? '#aba79a'
             : (() => {
                 const finish = c.fasciaColor !== 'same' && (g === 0 || g === c.girders - 1) ? c.fasciaColor : c.steelColor;
                 return steelFinishes[finish] ?? finish;
               })(),
+          undefined,
+          false,
         );
       if (c.material === 'steel' && c.girders > 1)
         for (const face of [-1, 1])
@@ -572,26 +600,41 @@ function renderSection() {
             drawing += rectangle(
               u + face * 0.007,
               u + face * 0.207,
-              top - 0.05,
-              top - girderDepthAt + 0.05,
+              top - 0.05 + xg,
+              top - girderDepthAt + 0.05 + xg,
               'none',
+              false,
             ).replace('stroke="#344a50"', 'stroke="#344a50" stroke-dasharray=".05 .04"');
+      // Haunch over each top flange (NEBT: the full 1200 mm flange): level on the flange, sloped under the slab.
       for (const flange of c.material === 'box'
         ? [sections[0], sections[1]]
         : [
             [
-              [-0.25, 0],
-              [0.25, 0],
+              [c.material === 'concrete' ? -0.6 : -0.25, 0],
+              [c.material === 'concrete' ? 0.6 : 0.25, 0],
             ],
-          ])
-        drawing += rectangle(u + flange[0][0], u + flange[1][0], -0.29, top, '#c0bdb1');
+          ]) {
+        const a = u + flange[0][0],
+          b = u + flange[1][0];
+        drawing += poly(
+          [
+            [a, -0.065 - c.deck + xf(a)],
+            [b, -0.065 - c.deck + xf(b)],
+            [b, top + xg],
+            [a, top + xg],
+          ],
+          '#c0bdb1',
+          undefined,
+          false,
+        );
+      }
     }
     drawing += concrete(
       [
         [-half, -0.065],
         [half, -0.065],
-        [half, -0.29],
-        [-half, -0.29],
+        [half, -0.065 - c.deck],
+        [-half, -0.065 - c.deck],
       ],
       '#b9b6aa',
     );
@@ -652,6 +695,29 @@ function renderSection() {
       return result;
     }
     // No wheel curb on a raised sidewalk: posts are anchored in the sidewalk.
+    if (type === 'SDC') {
+      const base = raised === null ? CURB_HEIGHT - 0.065 : raised,
+        u0 = edge - side * 0.2,
+        lean = Math.tan((12 * Math.PI) / 180),
+        at = h => u0 + side * h * lean;
+      let result = raised === null ? concrete(wheelCurb(edge, side, 0.065), '#b8b5aa') : '';
+      result += poly(
+        [
+          [u0 - 0.1, base],
+          [u0 + 0.1, base],
+          [at(2.3) + 0.1, base + 2.3],
+          [at(2.3) - 0.1, base + 2.3],
+        ],
+        '#d6dad8',
+      );
+      for (const [h, r] of [
+        [2.3, 0.1],
+        [1.1, 0.05],
+        [0.14, 0.04],
+      ])
+        result += `<circle cx="${at(h)}" cy="${base + h + xf(at(h))}" r="${r}" fill="#d6dad8" stroke="#344a50" stroke-width=".018"/>`;
+      return result;
+    }
     const curb = raised === null ? CURB_HEIGHT - 0.065 : raised,
       u = edge - side * (raised === null ? 0.18 : 0.12),
       h = type === '210A' ? 0.87 : 1.4;
@@ -701,6 +767,25 @@ function renderSection() {
     chain([-half, half, ...Array.from({ length: c.girders }, (_, g) => -half + c.overhang + g * spacing(c))], bottom - 0.55, bottom - 0.1);
   // Structure depth at the section, beside the left edge.
   dims += `<line x1="${X(-half - 0.7)}" x2="${X(-half - 0.7)}" y1="${Y(0)}" y2="${Y(bottom)}" stroke="#557279"/><line x1="${X(-half - 0.7) - 4}" x2="${X(-half - 0.7) + 4}" y1="${Y(0) + 4}" y2="${Y(0) - 4}" stroke="#17374b" stroke-width="1.4"/><line x1="${X(-half - 0.7) - 4}" x2="${X(-half - 0.7) + 4}" y1="${Y(bottom) + 4}" y2="${Y(bottom) - 4}" stroke="#17374b" stroke-width="1.4"/><text transform="translate(${X(-half - 0.7) - 6} ${(Y(0) + Y(bottom)) / 2}) rotate(-90)" text-anchor="middle" font-size="11.5" fill="#17374b">${fmt(-bottom)}</text>`;
+  // Crossfall arrows (pointing downhill) and the crown line.
+  if (c.crossfall !== 'flat') {
+    const pct = c.crossfall === 'crown' ? 2 : c.crossSlope,
+      marks =
+        c.crossfall === 'crown'
+          ? [
+              [(Math.max(-half, road.roadMin) + c.crownOffset) / 2, -1],
+              [(Math.min(half, road.roadMax) + c.crownOffset) / 2, 1],
+            ].filter(([u]) => Math.abs(u - c.crownOffset) > 0.6)
+          : [[(road.roadMin + road.roadMax) / 2, c.crossfall === 'right' ? 1 : -1]];
+    for (const [u, dir] of marks) {
+      const ua = u - (dir * 26) / k,
+        ub = u + (dir * 26) / k,
+        ya = Y(0.42 + xf(ua)),
+        yb = Y(0.42 + xf(ub));
+      dims += `<line x1="${X(ua)}" x2="${X(ub)}" y1="${ya}" y2="${yb}" stroke="#17374b" stroke-width="1.2"/><path d="M${X(ub)} ${yb} l${-dir * 8} -4 l0 8 z" fill="#17374b"/><text x="${X(u)}" y="${Math.min(ya, yb) - 7}" text-anchor="middle" font-size="11.5" fill="#17374b">${pct.toFixed(1)} %</text>`;
+    }
+    dims += `<line x1="${X(c.crownOffset)}" x2="${X(c.crownOffset)}" y1="${Y(1.4)}" y2="${Y(bottom - 0.3)}" stroke="#b0412e" stroke-width=".9" stroke-dasharray="10 3 2 3"/><text x="${X(c.crownOffset) + 4}" y="${Y(1.4) + 10}" font-size="10.5" fill="#b0412e">${c.crossfall === 'crown' ? 'Crown line' : 'Profile grade line'}</text>`;
+  }
   // Title block: variant, software version, date and author.
   const today = new Date().toISOString().slice(0, 10),
     bx = svgWidth - 300,
@@ -725,6 +810,11 @@ function update(raw, { resetCamera = false, refresh = false } = {}) {
   // The sky dome is the backdrop and the reflected sky; clouds are optional.
   sky.mesh.visible = config.background !== 'white';
   sky.setClouds(config.skyMode === 'clouds' || config.weather === 'rain' || config.weather === 'snow');
+  sky.setModel(config.skyModel);
+  if (sky.seed !== config.seed) {
+    sky.setSeed(config.seed);
+    sky.seed = config.seed;
+  }
   const glossy = config.waterStyle === 'glossy',
     w = materials.water.userData.water,
     q = tier();
@@ -775,10 +865,16 @@ function update(raw, { resetCamera = false, refresh = false } = {}) {
   const updateMs = performance.now() - started;
   $('preset').value = 'custom';
   scene.userData.radius = frameShadows(scene.userData.lights.sun, model);
+  scene.userData.birdCentre = new T.Box3().setFromObject(model.structure).getCenter(new T.Vector3());
   applyTimeOfDay(config.timeOfDay);
   window.bridgeSketch = window.bridgeViewer = {
     getConfig: () => structuredClone(config),
     frames: () => frameCount,
+    debug: () => ({ scene, sky, renderer, camera }),
+    freeze: (on = true) => {
+      frozen = on;
+      needsRender = true;
+    },
     update: raw => update(raw, { refresh: true }),
     getStats: () => ({
       triangles,
@@ -878,8 +974,12 @@ function fit(mode = 'perspective') {
   camera.updateMatrixWorld();
   const right = new T.Vector3().setFromMatrixColumn(camera.matrixWorld, 0),
     up = new T.Vector3().setFromMatrixColumn(camera.matrixWorld, 1),
-    tanV = Math.tan((18 * Math.PI) / 180) * Math.max(0.4, (height - 165) / height),
-    tanH = (Math.tan((18 * Math.PI) / 180) * aspect * (width - 70)) / width;
+    // Room left by the overlays: desktop toolbars at the bottom, compact rows on phones (0.6.0).
+    compact = matchMedia('(max-width: 760px), (max-height: 500px) and (orientation: landscape)').matches,
+    uiV = compact ? 150 : 165,
+    uiH = compact ? 16 : 70,
+    tanV = Math.tan((18 * Math.PI) / 180) * Math.max(0.4, (height - uiV) / height),
+    tanH = (Math.tan((18 * Math.PI) / 180) * aspect * (width - uiH)) / width;
   let distance = 20,
     halfHeight = 5;
   for (const x of [bounds.min.x, bounds.max.x])
@@ -890,7 +990,7 @@ function fit(mode = 'perspective') {
           py = Math.abs(p.dot(up)),
           depth = p.dot(direction);
         distance = Math.max(distance, depth + Math.max(px / tanH, py / tanV));
-        halfHeight = Math.max(halfHeight, px / aspect / (1 - 70 / width), py / Math.max(0.4, (height - 165) / height));
+        halfHeight = Math.max(halfHeight, px / aspect / (1 - uiH / width), py / Math.max(0.4, (height - uiV) / height));
       }
   if (camera.isOrthographicCamera) {
     camera.top = halfHeight * 1.06;
@@ -981,7 +1081,7 @@ function driveFrame(dt) {
   camera.position.fromArray(pose.position);
   controls.target.fromArray(pose.target);
   camera.lookAt(controls.target);
-  const label = { road: 'ROAD', water: 'RIVER', rail: 'RAILWAY' }[route.type];
+  const label = { road: 'ROAD', water: 'RIVER', rail: 'RAILWAY', land: 'GROUND' }[route.type];
   $('drive-status').textContent =
     label +
     ' VIEW · SPAN ' +
@@ -1048,6 +1148,8 @@ async function boot() {
   reflection = createPlanarReflection();
   weather = makeWeather();
   scene.add(...weather.objects);
+  ambient = makeAmbient();
+  scene.add(ambient.mesh);
   const sun = new T.DirectionalLight(0xfff5e5, 3.0);
   sun.position.set(-45, 65, 40);
   sun.castShadow = true;
@@ -1156,6 +1258,16 @@ async function boot() {
       clockDt = Math.min(0.5, Math.max(0, (time - lastTime) / 1000));
     lastTime = time;
     if (document.hidden) return;
+    if (frozen) {
+      if (needsRender) {
+        renderer.shadowMap.needsUpdate = true;
+        renderReflection();
+        renderer.render(scene, camera);
+        needsRender = false;
+        frameCount++;
+      }
+      return;
+    }
     if (fly) flyFrame(time);
     else if (driving) driveFrame(dt);
     else controls.update(dt);
@@ -1168,6 +1280,7 @@ async function boot() {
     }
     const cloudy = sky.mesh.visible && (config.skyMode === 'clouds' || config.weather === 'rain' || config.weather === 'snow');
     if (weather.active) weather.animate(dt, camera);
+    if (ambient.mesh.visible && sky.mesh.visible) ambient.animate(time / 1000);
     if (cloudy) skyTime += dt;
     sky.animate(skyTime, camera);
     // Moving cloud shadows drift with the sky (materials.mjs); they follow the sun, not the shadow map.
@@ -1533,7 +1646,7 @@ $('share').onclick = async () => {
     field.select();
   }
 };
-$('image').onclick = () => {
+$('image').onclick = async () => {
   if (view === 'section') {
     download(
       new Blob([new XMLSerializer().serializeToString($('sectionSvg'))], { type: 'image/svg+xml' }),
@@ -1542,35 +1655,88 @@ $('image').onclick = () => {
     notify('Section saved.');
     return;
   }
-  renderer.render(scene, camera);
-  const canvas = document.createElement('canvas');
-  canvas.width = renderer.domElement.width;
-  canvas.height = renderer.domElement.height;
-  const ctx = canvas.getContext('2d');
-  const bg = ctx.createRadialGradient(
-    canvas.width * 0.45,
-    canvas.height * 0.12,
-    0,
-    canvas.width * 0.45,
-    canvas.height * 0.12,
-    canvas.width,
-  );
-  const shade = 1 - scene.userData.daylight;
-  for (const [stop, day, night] of [
-    [0, '#5e7b8b', '#172b46'],
-    [0.52, '#35566c', '#0a1930'],
-    [1, '#203d51', '#050d1d'],
-  ])
-    bg.addColorStop(stop, new T.Color(day).lerp(new T.Color(night), shade).getStyle());
-  ctx.fillStyle = config.background === 'white' ? '#ffffff' : bg;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(renderer.domElement, 0, 0);
-  canvas.toBlob(blob => {
+  // High-quality snapshot: rendered once at up to 3840 px wide (supersampled for small windows), with a 4096 px
+  // shadow map, full-resolution water reflection and the dense meadow, then saved as a lossless PNG.
+  const button = $('image'),
+    sun = scene.userData.lights.sun,
+    host = $('canvasHost'),
+    saved = {
+      ratio: renderer.getPixelRatio(),
+      shadow: sun.shadow.mapSize.x,
+      near: grassUniforms.grassNear.value,
+      far: grassUniforms.grassFar.value,
+    };
+  const gl = renderer.getContext(),
+    maxSize = Math.min(gl.getParameter(gl.MAX_RENDERBUFFER_SIZE), gl.getParameter(gl.MAX_TEXTURE_SIZE), 8192),
+    ratio = Math.max(saved.ratio, Math.min(3, 3840 / host.clientWidth, maxSize / host.clientWidth, maxSize / host.clientHeight));
+  button.disabled = true;
+  try {
+    renderer.setPixelRatio(ratio);
+    renderer.setSize(host.clientWidth, host.clientHeight);
+    sun.shadow.mapSize.set(4096, 4096);
+    sun.shadow.map?.dispose();
+    sun.shadow.map = null;
+    renderer.shadowMap.needsUpdate = true;
+    grassUniforms.grassNear.value = 120;
+    grassUniforms.grassFar.value = 400;
+    reflection.setScale(1);
+    renderReflection();
+    renderer.render(scene, camera);
+    const canvas = document.createElement('canvas');
+    canvas.width = renderer.domElement.width;
+    canvas.height = renderer.domElement.height;
+    const ctx = canvas.getContext('2d');
+    const bg = ctx.createRadialGradient(
+      canvas.width * 0.45,
+      canvas.height * 0.12,
+      0,
+      canvas.width * 0.45,
+      canvas.height * 0.12,
+      canvas.width,
+    );
+    const shade = 1 - scene.userData.daylight;
+    for (const [stop, day, night] of [
+      [0, '#5e7b8b', '#172b46'],
+      [0.52, '#35566c', '#0a1930'],
+      [1, '#203d51', '#050d1d'],
+    ])
+      bg.addColorStop(stop, new T.Color(day).lerp(new T.Color(night), shade).getStyle());
+    ctx.fillStyle = config.background === 'white' ? '#ffffff' : bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(renderer.domElement, 0, 0);
+    // The same soft vignette as the viewport (CSS), baked into the picture.
+    if (config.background !== 'white') {
+      const v = ctx.createRadialGradient(
+        canvas.width / 2,
+        canvas.height / 2,
+        Math.min(canvas.width, canvas.height) * 0.45,
+        canvas.width / 2,
+        canvas.height / 2,
+        Math.hypot(canvas.width, canvas.height) * 0.62,
+      );
+      v.addColorStop(0, 'rgba(8,20,32,0)');
+      v.addColorStop(1, 'rgba(8,20,32,0.28)');
+      ctx.fillStyle = v;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
     if (blob) {
       download(blob, fileBase() + '.png');
-      notify('Snapshot saved.');
+      notify(`Snapshot saved · ${canvas.width} × ${canvas.height} px PNG (lossless).`);
     } else notify('Could not create the snapshot.', true);
-  }, 'image/png');
+  } finally {
+    renderer.setPixelRatio(saved.ratio);
+    renderer.setSize(host.clientWidth, host.clientHeight);
+    sun.shadow.mapSize.set(saved.shadow, saved.shadow);
+    sun.shadow.map?.dispose();
+    sun.shadow.map = null;
+    shadowDirty = true;
+    grassUniforms.grassNear.value = saved.near;
+    grassUniforms.grassFar.value = saved.far;
+    reflection.setScale(tier().reflection);
+    button.disabled = false;
+    needsRender = true;
+  }
 };
 $('export-glb').onclick = async () => {
   const button = $('export-glb');

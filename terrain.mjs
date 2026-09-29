@@ -1,11 +1,11 @@
 // BridgeSketch 3D · Site: crossings, terrain, approach fills and slopes, river, vegetation and buildings.
 import * as T from 'three';
 import { makeTrain, kenneyGeometry, kenneySize, buildingStyles } from './kenney-scene.mjs';
-import { alignmentStation, frame, girderDepth, profile, totalLength, stations, supportStation, waterGroups } from './geometry.mjs';
+import { alignmentStation, crossAt, frame, girderDepth, profile, totalLength, stations, supportStation, waterGroups } from './geometry.mjs';
 import { beam, box, seeded, soffitAt } from './sections.mjs';
 import { roadsideGuardrail } from './railings.mjs';
 import { positionVehicle, vehicle } from './traffic.mjs';
-import { tuftGeometry, flowerGeometry, scatterMeadow, grassBudget } from './grass.mjs';
+import { tuftGeometry, flowerGeometry, scatterMeadow, grassBudget, grassKinds } from './grass.mjs';
 import { addTrees } from './trees.mjs';
 import { effectiveQuality, renderSettings } from './quality.mjs';
 import { RAIL_BED } from './geometry.mjs';
@@ -97,11 +97,36 @@ export function obstacleTour(c) {
   };
 }
 
+// Crossing roads (0.6.0): 2 % crown each way from the centreline, carriageway 0.5 m above the surrounding ground,
+// 1 m gravel shoulders, 3H:1V fore-slopes to shallow drainage ditches (0.3 m deep, 0.8 m flat bottom) and 3H:1V
+// back-slopes up to the ground. Levels are relative to the crossing elevation (road crown).
+export const ROAD_CROWN = 0.02,
+  ROAD_RAISE = 0.5;
+export function roadBed(width, d) {
+  const w2 = width / 2,
+    edge = -ROAD_CROWN * w2,
+    ground = -ROAD_RAISE,
+    ditch = ground - 0.3,
+    top = edge - 0.06,
+    d1 = w2 + 1,
+    d2 = d1 + (top - ditch) * 3,
+    d3 = d2 + 0.8,
+    d4 = d3 + 0.9;
+  if (d <= w2) return { y: edge - 0.25, reach: d4 };
+  if (d <= d1) return { y: edge - 0.02 - 0.04 * (d - w2), reach: d4 };
+  if (d <= d2) return { y: top - (d - d1) / 3, reach: d4 };
+  if (d <= d3) return { y: ditch, reach: d4 };
+  if (d <= d4) return { y: ditch + (d - d3) / 3, reach: d4 };
+  return { y: ground, reach: d4 };
+}
+
 export function terrainSampler(c) {
   const ss = stations(c),
     obstacles = c.spans.flatMap((s, i) =>
       s.obstacle === 'water' ? [] : [crossing(c, (ss[i] + ss[i + 1]) / 2, s.angle, s.width, s.elevation, s.obstacle)],
     );
+  // Open ground (terrain vague): a gently rolling surface at the span elevation, blended into the neighbours.
+  const lumpy = (x, z) => 0.18 * Math.sin(x * 0.21 + z * 0.13) * Math.cos(z * 0.17 - x * 0.07) + 0.1 * Math.sin(x * 0.53 - z * 0.41) - 0.28;
   for (const g of waterGroups(c)) {
     const first = c.spans[g.startIndex],
       last = c.spans[g.endIndex],
@@ -130,6 +155,17 @@ export function terrainSampler(c) {
       if (o.type === 'water') {
         const lift = T.MathUtils.clamp((o.width / 2 + 7 - distance) / 4, 0, 1);
         y += (Math.max(y, o.elevation + 0.2) - y) * lift;
+      }
+      if (o.type === 'road') {
+        const bed = roadBed(o.width, distance),
+          k = T.MathUtils.smoothstep(bed.reach + 6 - distance, 0, 6);
+        y = y * (1 - k) + (o.elevation + bed.y) * k;
+        continue;
+      }
+      if (o.type === 'land') {
+        const k = T.MathUtils.smoothstep(o.width / 2 + 12 - distance, 0, 12);
+        y = y * (1 - k) + (o.elevation + lumpy(x, z) * T.MathUtils.smoothstep(o.width / 2 + 4 - distance, 0, 8)) * k;
+        continue;
       }
       y = y * (1 - blend) + (o.elevation - (o.type === 'water' ? 0.65 : 0.12)) * blend;
     }
@@ -182,6 +218,15 @@ export function terrainSampler(c) {
           out = d - shore;
         if (out > 0) y = Math.min(y, o.elevation + 0.2 + Math.min(out, 4) * 0.08 + Math.max(0, out - berm) / 2);
         else y = Math.min(y, o.elevation - 0.65 + Math.max(0, 1 + out) * 0.85);
+        continue;
+      }
+      if (o.type === 'road') {
+        const bed = roadBed(o.width, d);
+        y = Math.min(y, o.elevation + bed.y + Math.max(0, d - bed.reach) / 2);
+        continue;
+      }
+      if (o.type === 'land') {
+        y = Math.min(y, o.elevation + 0.3 + Math.max(0, d - o.width / 2) / 2);
         continue;
       }
       y = Math.min(y, o.elevation - 0.12 + Math.max(0, d - o.width / 2 - 1.5) / 2);
@@ -239,7 +284,7 @@ export function approachSurfaces(c, extent = 0) {
   const apex = (station, u) => {
     const s = supportStation(c, station, u),
       f = frame(c, s, u);
-    return { f, p: [f.x, profile(c, s) - 0.17, f.z] };
+    return { f, p: [f.x, profile(c, s) - 0.17 + crossAt(c, u), f.z] };
   };
   const toe = (p, dx, dz) => {
     let lo = 0,
@@ -424,7 +469,7 @@ export function intersectsRoad(polygons, x, z, radius = 0) {
 export function crossingCorridors(c, extent = totalLength(c) + 2 * c.approach + 36, halfZ = c.sceneWidth / 2) {
   const ss = stations(c),
     strips = c.spans.flatMap((span, i) => {
-      if (span.obstacle === 'water') return [];
+      if (span.obstacle === 'water' || span.obstacle === 'land') return [];
       const o = crossing(c, (ss[i] + ss[i + 1]) / 2, span.angle, span.width, span.elevation, span.obstacle),
         reach = Math.hypot(extent, 2 * halfZ);
       let polygon = [
@@ -483,6 +528,57 @@ export function crossingCorridors(c, extent = totalLength(c) + 2 * c.approach + 
     });
   }
   return zones;
+}
+
+// Prism along a crossing: section points (across, y above the crossing elevation), extruded over ±halfLength.
+const rect4 = (a, b, y) => [
+  [a, y + 0.004],
+  [b, y + 0.004],
+  [b, y - 0.006],
+  [a, y - 0.006],
+];
+function addPrism(parent, mat, o, halfLength, section) {
+  const position = [],
+    n = section.length,
+    at = (t, [a, y]) => world(o, t, a, o.elevation + y);
+  const tri = (p, q, r) => position.push(...p, ...q, ...r);
+  for (let k = 0; k < n; k++) {
+    const a = section[k],
+      b = section[(k + 1) % n];
+    tri(at(-halfLength, a), at(halfLength, a), at(halfLength, b));
+    tri(at(-halfLength, a), at(halfLength, b), at(-halfLength, b));
+  }
+  for (const t of [-halfLength, halfLength])
+    for (let k = 1; k < n - 1; k++) tri(at(t, section[0]), at(t, section[k]), at(t, section[k + 1]));
+  const g = new T.BufferGeometry();
+  g.setAttribute('position', new T.Float32BufferAttribute(position, 3));
+  // Face every triangle away from the prism axis (sections may come in either winding).
+  const p = g.attributes.position,
+    centre = new T.Vector3(),
+    v = [new T.Vector3(), new T.Vector3(), new T.Vector3()];
+  const axis = world(o, 0, section.reduce((s, q) => s + q[0], 0) / n, o.elevation + section.reduce((s, q) => s + q[1], 0) / n);
+  for (let i = 0; i < p.count; i += 3) {
+    for (let j = 0; j < 3; j++) v[j].fromBufferAttribute(p, i + j);
+    const normal = new T.Vector3().subVectors(v[1], v[0]).cross(new T.Vector3().subVectors(v[2], v[0]));
+    centre.copy(v[0]).add(v[1]).add(v[2]).divideScalar(3);
+    const along = (centre.x - axis[0]) * o.dx + (centre.z - axis[2]) * o.dz,
+      out = new T.Vector3(centre.x - axis[0] - along * o.dx, centre.y - axis[1], centre.z - axis[2] - along * o.dz);
+    if (Math.abs(along) > halfLength - 1e-3) out.set(o.dx * Math.sign(along), 0, o.dz * Math.sign(along));
+    if (normal.dot(out) < 0) {
+      const x = [p.getX(i + 1), p.getY(i + 1), p.getZ(i + 1)];
+      p.setXYZ(i + 1, p.getX(i + 2), p.getY(i + 2), p.getZ(i + 2));
+      p.setXYZ(i + 2, ...x);
+    }
+  }
+  const uv = [];
+  for (let i = 0; i < p.count; i++) uv.push(p.getX(i) / 4, p.getZ(i) / 4);
+  g.setAttribute('uv', new T.Float32BufferAttribute(uv, 2));
+  g.computeVertexNormals();
+  const mesh = new T.Mesh(g, mat);
+  mesh.castShadow = mesh.receiveShadow = true;
+  mesh.name = 'Crossing road';
+  parent.add(mesh);
+  return mesh;
 }
 
 // Instanced copies grouped in square tiles (tile metres); each tile gets its own bounding sphere for culling.
@@ -700,7 +796,7 @@ export function addEnvironment(c, m, parent, fills) {
       }
       const actual = supportStation(c, station, u),
         p = frame(c, actual, u);
-      points.push([target, profile(c, actual) - 0.17, p.z]);
+      points.push([target, profile(c, actual) - 0.17 + crossAt(c, u), p.z]);
     }
     points.sort((p, q) => p[2] - q[2]);
     const top = [];
@@ -739,7 +835,12 @@ export function addEnvironment(c, m, parent, fills) {
   }
   box(parent, m.earth, 0, base - 0.2, 0, extent, 0.4, halfZ * 2);
   let railIndex = 0;
-  for (const o of obstacles.filter(o => o.type !== 'water')) {
+  // Two or more crossing roads form a divided highway: each carriageway carries one direction (right-hand
+  // traffic: the carriageway on the right of the travel direction runs forwards).
+  const roads = obstacles.filter(o => o.type === 'road'),
+    divided = roads.length >= 2,
+    mid = roads.reduce((a, o) => [a[0] + o.x / roads.length, a[1] + o.z / roads.length], [0, 0]);
+  for (const o of obstacles.filter(o => o.type === 'road' || o.type === 'rail')) {
     const halfLength = Math.max(
       1,
       Math.min(
@@ -749,30 +850,52 @@ export function addEnvironment(c, m, parent, fills) {
       ),
     );
     o.halfLength = halfLength;
-    const basePos = world(o, 0, 0, o.elevation - 0.1);
-    box(parent, o.type === 'road' ? m.asphalt : m.sand, ...basePos, 2 * halfLength, 0.2, o.width, o.yaw);
     if (o.type === 'road') {
+      const w2 = o.width / 2,
+        edge = -ROAD_CROWN * w2,
+        crown = u => o.elevation - ROAD_CROWN * Math.abs(u);
+      // Crowned carriageway and gravel shoulders, extruded along the crossing.
+      addPrism(parent, m.asphalt, o, halfLength, [
+        [-w2, edge],
+        [0, 0],
+        [w2, edge],
+        [w2, edge - 0.45],
+        [-w2, edge - 0.45],
+      ]);
       for (const side of [-1, 1])
-        box(
-          parent,
-          m.white,
-          ...world(o, 0, side * (o.width / 2 - 0.3), o.elevation + 0.013),
-          2 * halfLength,
-          0.018,
-          0.1,
-          o.yaw,
-        );
-      // Dashed yellow centre line between the two directions: 3 m dashes every 9 m.
-      for (let t = -halfLength; t < halfLength - 0.5; t += 9) {
-        const dash = Math.min(3, halfLength - t);
-        box(parent, m.yellow, ...world(o, t + dash / 2, 0, o.elevation + 0.016), dash, 0.02, 0.1, o.yaw);
+        addPrism(parent, m.sand, o, halfLength, [
+          [side * w2, edge - 0.015],
+          [side * (w2 + 1.05), edge - 0.065],
+          [side * (w2 + 1.05), edge - 0.4],
+          [side * w2, edge - 0.4],
+        ]);
+      const forward = divided ? (o.x - mid[0]) * o.nx + (o.z - mid[1]) * o.nz >= 0 : null,
+        line = (u, mat, y = 0.013) => addPrism(parent, mat, o, halfLength, rect4(u - 0.05, u + 0.05, crown(u) - o.elevation + y));
+      for (const side of [-1, 1]) {
+        // Divided highway: yellow line on the left edge of each carriageway, white on the right.
+        const left = divided && (forward ? side < 0 : side > 0);
+        line(side * (w2 - 0.3), left ? m.yellow : m.white);
       }
+      const dashes = mat => {
+        for (let t = -halfLength; t < halfLength - 0.5; t += 9) {
+          const dash = Math.min(3, halfLength - t);
+          box(parent, mat, ...world(o, t + dash / 2, 0, o.elevation + 0.016), dash, 0.02, 0.1, o.yaw);
+        }
+      };
+      if (divided) dashes(m.white);
+      else if (c.centreLine === 'double') for (const du of [-0.1, 0.1]) line(du, m.yellow, 0.016);
+      else dashes(m.yellow);
       roadsideGuardrail(parent, m, c, -halfLength, halfLength, o.width / 2 + 0.35, o);
       roadsideGuardrail(parent, m, c, -halfLength, halfLength, -o.width / 2 - 0.35, o);
       if (c.showTraffic && o.width >= 6.4)
-        for (const t of [-halfLength * 0.6, halfLength * 0.6])
-          vehicle(parent, m, c, t, ((t < 0 ? 1 : -1) * o.width) / 4, t < 0 ? 'car' : 'truck', t < 0, o);
+        for (const t of [-halfLength * 0.6, halfLength * 0.6]) {
+          const dir = divided ? forward : t < 0,
+            lane = divided ? (t < 0 ? 1 : -1) * (dir ? 1 : -1) : dir ? 1 : -1,
+            kind = t < 0 ? 'car' : (Math.abs(Math.round(o.x * 7 + c.seed)) % 2 === 0 ? 'double' : 'truck');
+          vehicle(parent, m, c, t, (lane * o.width) / 4, kind, dir, o);
+        }
     } else {
+      box(parent, m.sand, ...world(o, 0, 0, o.elevation - 0.1), 2 * halfLength, 0.2, o.width, o.yaw);
       const tracks = o.width >= 7 ? [-1.8, 1.8] : [0];
       // Crushed-stone ballast bed, 0.5 m above the ground: 1.5H:1V shoulders, sleepers and rails on top.
       const bedTop = RAIL_BED,
@@ -924,26 +1047,45 @@ export function addEnvironment(c, m, parent, fills) {
       budget: grassBudget[tier] ?? grassBudget.balanced,
       height: terrainHeight,
       occupied: (x, z, margin) => clearGround(x, z, margin) || nearWater(x, z),
+      // Wet river banks grow sedges and reeds; 2H:1V slopes and embankments dry bunch grass.
+      zone: (x, z) => {
+        for (const o of obstacles) {
+          if (o.type !== 'water') continue;
+          const p = coordinates(o, x, z);
+          const d = Math.abs(p.across - riverWiggle(p.along, c)) - o.width / 2,
+            h = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
+          if (d < 5.5 && h - Math.floor(h) < 0.75 - d * 0.08) return 'tall';
+        }
+        const gx = terrainHeight(x + 0.8, z) - terrainHeight(x - 0.8, z),
+          gz = terrainHeight(x, z + 0.8) - terrainHeight(x, z - 0.8);
+        return Math.hypot(gx, gz) / 1.6 > 0.26 ? 'dry' : 'meadow';
+      },
     });
     const green = new T.Color(),
       dry = new T.Color('#e8d59a'),
       lawn = new T.Color('#b9d98a'),
       straw = new T.Color('#d9a95a'),
       rust = new T.Color('#b9713c');
-    // Meadow tufts in square tiles, so the renderer can frustum-cull what is off screen.
-    const blades = instancedTiles(parent, tuftGeometry(), m.grassBlade, meadow.items, 32, (d, g) => {
-      d.position.set(g.x, g.y, g.z);
-      d.scale.set(g.s, g.s * (c.environment === 'urban' ? 0.55 : season === 'fall' ? 0.85 : 1), g.s);
-      d.rotation.y = g.r;
-    }, g => {
-      green.setRGB(0.8 + rng() * 0.2, 0.86 + rng() * 0.14, 0.72 + rng() * 0.22).lerp(dry, g.dry * 0.45);
-      if (c.environment === 'urban') green.lerp(lawn, 0.35);
-      if (season === 'fall') green.lerp(g.dry > 0.55 ? rust : straw, 0.5 + 0.3 * g.dry);
-      return green;
-    });
-    for (const grass of blades) {
-      grass.name = 'Meadow blades';
-      grass.castShadow = false;
+    // Meadow tufts in square tiles, so the renderer can frustum-cull what is off screen; one set per species.
+    for (const kind of grassKinds) {
+      const items = meadow.items.filter(g => g.kind === kind);
+      if (!items.length) continue;
+      const blades = instancedTiles(parent, tuftGeometry(kind), m.grassBlade, items, 32, (d, g) => {
+        d.position.set(g.x, g.y, g.z);
+        const lawnScale = c.environment === 'urban' && kind === 'meadow' ? 0.55 : 1;
+        d.scale.set(g.s, g.s * lawnScale * (season === 'fall' ? 0.85 : 1), g.s);
+        d.rotation.y = g.r;
+      }, g => {
+        green.setRGB(0.84 + rng() * 0.16, 0.88 + rng() * 0.12, 0.78 + rng() * 0.18).lerp(dry, g.dry * (kind === 'dry' ? 0.25 : 0.4));
+        if (c.environment === 'urban') green.lerp(lawn, 0.35);
+        if (season === 'fall') green.lerp(g.dry > 0.55 || kind === 'dry' ? rust : straw, 0.5 + 0.3 * g.dry);
+        return green;
+      });
+      for (const grass of blades) {
+        grass.name = 'Meadow blades';
+        grass.userData.kind = kind;
+        grass.castShadow = false;
+      }
     }
     const palette = ['#f4f1e6', '#f2cf55', '#b9a3dd', '#e98f7c'].map(color => new T.Color(color));
     const flowers =

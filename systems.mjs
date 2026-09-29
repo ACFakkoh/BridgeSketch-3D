@@ -4,6 +4,7 @@
 import * as T from 'three';
 import {
   archSpanIndex,
+  crossAt,
   frame,
   girderDepth,
   profile,
@@ -109,7 +110,7 @@ export function addPsbox(c, m, structure) {
           [u + box.top - box.web, y1 + y],
           [u + box.bottom - box.web, yb(u + box.bottom) + tb + y],
           [u - box.bottom + box.web, yb(u - box.bottom) + tb + y],
-        ],
+        ].map(([v, w]) => [v, w + crossAt(c, v)]),
         end ? 0.9 : 1.2,
         'Box girder diaphragm',
       );
@@ -250,8 +251,8 @@ export function addArch(c, m, structure, earth, ground = () => -1e3) {
       for (const side of [-1, 1]) {
         const y = axis(s),
           u = side * (edge - (y - 0.25) * lean),
-          top = supportPoint(c, s, u, profile(c, supportStation(c, s, u)) + y - h0 / 2),
-          bottom = supportPoint(c, s, side * edge, profile(c, supportStation(c, s, side * edge)) + 0.15);
+          top = supportPoint(c, s, u, profile(c, supportStation(c, s, u)) + crossAt(c, u) + y - h0 / 2),
+          bottom = supportPoint(c, s, side * edge, profile(c, supportStation(c, s, side * edge)) + crossAt(c, side * edge) + 0.15);
         const hanger = beam(group, m.railing, bottom, top, 0.07, 0.07);
         hanger.name = 'Hanger';
       }
@@ -264,8 +265,8 @@ export function addArch(c, m, structure, earth, ground = () => -1e3) {
       if (!clear(s) || j % 2) continue;
       const y = axis(s),
         u = edge - (y - 0.25) * lean,
-        p = supportPoint(c, s, -u, profile(c, supportStation(c, s, 0)) + y),
-        q = supportPoint(c, s, u, profile(c, supportStation(c, s, 0)) + y);
+        p = supportPoint(c, s, -u, profile(c, supportStation(c, s, 0)) + crossAt(c, -u) + y),
+        q = supportPoint(c, s, u, profile(c, supportStation(c, s, 0)) + crossAt(c, u) + y);
       beam(group, mat, p, q, 0.45, 0.45).name = 'Wind brace strut';
       struts.push([p, q]);
     }
@@ -278,8 +279,8 @@ export function addArch(c, m, structure, earth, ground = () => -1e3) {
       beam(
         group,
         mat,
-        supportPoint(c, s, -edge, profile(c, supportStation(c, s, -edge)) - 0.6),
-        supportPoint(c, s, edge, profile(c, supportStation(c, s, edge)) - 0.6),
+        supportPoint(c, s, -edge, profile(c, supportStation(c, s, -edge)) + crossAt(c, -edge) - 0.6),
+        supportPoint(c, s, edge, profile(c, supportStation(c, s, edge)) + crossAt(c, edge) - 0.6),
         0.8,
         1.2,
       ).name = 'End cross-girder';
@@ -326,6 +327,7 @@ export function addArch(c, m, structure, earth, ground = () => -1e3) {
         mat,
         () => 0,
         Math.max(28, Math.ceil(L / 1.2)),
+        false,
       );
     rib.name = 'Arch rib';
     group.add(rib);

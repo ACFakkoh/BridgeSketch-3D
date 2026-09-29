@@ -1,5 +1,28 @@
 # BridgeSketch 3D
 
+## 0.6.0 — 2026-09-28 — Anthony Chéruel
+
+Directives Notion « Bridge Sketch 3D fix and features for 0.6 »:
+
+- Deck crossfall: crown with 2 % on each side of an adjustable crown line (default: deck centreline), or a uniform 2 / 3 / 4 % crossfall to the left or right (or flat). Slab, asphalt, curbs, barriers, railings, lights, vehicles, approaches, return-wall and backwall tops follow it; each girder is set rigidly at its own level with level haunches, bearings, seats, diaphragms and bracing adapted. The section shows the crossfall arrows and the crown line.
+- Every girder bridge (steel and NEBT) is continuous over the piers by default.
+- NEBT: haunches cover the full 1200 mm top flange (3D and section); cast-in-place intermediate diaphragms per MTQ Table 8.2-4 (none up to 15 m, one up to 30 m, two up to 45 m, one per 15 m, equally spaced).
+- Girder screens (cache-poutres) at the abutments: a concrete wall under each deck edge from the seat to the slab (option, on by default for girder bridges).
+- Bent caps: linear taper from the outer column face to the end thickness.
+- Railings: new architectural railing « Samuel-De Champlain » (2.4 m, leaning 12° outwards, round top rail, handrail, balusters, white-grey paint); posts at 3000 mm on one grid along spans and approaches; the bridge railings always continue to the end of the return walls (then W-beam, continued railings or nothing); no asphalt under approach wheel curbs and barriers (concrete strip, pavement stops at the curb face).
+- Markings: optional solid double yellow line between directions (deck and two-way crossing roads).
+- Crossing roads: 2 % crown from the centreline, carriageway 0.5 m above the ground, 1 m gravel shoulders, 3H:1V slopes to 0.3 m drainage ditches. Two or more crossing roads form a divided highway: one direction per carriageway (right-hand traffic), yellow left edge line, dashed white lane line.
+- New obstacle « Open ground » (terrain vague): no crossing, a gently rolling surface at the span elevation blended into the neighbouring terrain.
+- New vehicle: double (train routier) with a long-nose tractor and two pup trailers, 18.0 m from the steer axle to the last axle, 4.8 m high.
+- Sky: seeded procedural starfield (≈ 4 200 stars, blackbody colours, twinkle, hidden by clouds and daylight) and a faint Milky Way, after CK42BB/procedural-stars-threejs (MIT). Optional physical sky (Preetham scattering, after Tw1ddle/Sky-Shader, MIT); the tuned stylised sky stays the default.
+- Grass: three species after CK42BB/procedural-grass-threejs (MIT) — meadow, tall sedges and reeds with cattails on the wet river banks, dry bunch grass on slopes and dry patches — with tapered, pointed blades; slightly lower tuft budget.
+- Concrete finish: rough (existing), smooth formwork (plywood panel joints and tie holes) or weathered (runoff streaks, patina, lichen), procedural in the shader.
+- Snapshot: camera icon; rendered once at up to 3840 px (×3 max) with a 4096 px shadow map, full-resolution reflection and the dense meadow, saved as a lossless PNG with the viewport vignette.
+- Phones and tablets: the 3D view on top with a fixed aspect, the parameters below; compact scrolling toolbars; camera framing adapted to the smaller overlays.
+- Low-cost visual touches: soft CSS vignette, a flock of 18 birds by day (one instanced draw call, GPU-animated), glowing head and tail lamps after dusk, wet (glossier) asphalt and concrete in the rain.
+- New concept: « Highway overpass · NEBT » (divided highway and open median, crown, double yellow line, formwork concrete, tapered caps, girder screens).
+- Checks: `node check.mjs` covers crossfall, continuity, haunch width, MTQ diaphragm counts, girder screens, linear cap taper, SDC railing, the post grid, approach curbs, open ground, crowned roads and ditches, the divided highway and the double truck.
+
 ## 0.5.6 — 2026-09-27 — Anthony Chéruel
 
 - Orbit is off by default, at start-up and when a concept is selected.

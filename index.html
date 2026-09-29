@@ -165,6 +165,38 @@
               <div class="derived"><span>Outer shoulder · L / R</span><strong id="shoulders">—</strong></div>
             </div>
             <div class="panel-column">
+              <h3 class="section-label">Crossfall & markings</h3>
+              <label
+                >Deck crossfall<select name="crossfall">
+                  <option value="crown">Crown · 2 % each side of the crown line</option>
+                  <option value="right">Uniform · falling to the right</option>
+                  <option value="left">Uniform · falling to the left</option>
+                  <option value="flat">Flat · no crossfall</option>
+                </select></label
+              >
+              <div class="field-grid">
+                <label id="cross-slope-label"
+                  >Uniform slope<select name="crossSlope">
+                    <option value="2">2 %</option>
+                    <option value="3">3 %</option>
+                    <option value="4">4 %</option>
+                  </select></label
+                ><label id="crown-offset-label"
+                  >Crown line offset · m<input name="crownOffset" type="number" min="-15" max="15" step="0.05"
+                /></label>
+              </div>
+              <label
+                >Line between directions<select name="centreLine">
+                  <option value="dashed">Dashed yellow line</option>
+                  <option value="double">Solid double yellow line</option>
+                </select></label
+              >
+              <p class="hint">
+                The crown line is the profile grade line (0 = deck centreline, + to the right). Slab, barriers, girders
+                and approaches follow the crossfall; girders are set at their own level under it.
+              </p>
+            </div>
+            <div class="panel-column">
               <h3 class="section-label">Centre median</h3>
               <label
                 >Median type<select name="medianType">
@@ -205,6 +237,7 @@
                   <option value="210A">Steel HSS 210A · 870 mm</option>
                   <option value="210C">Steel HSS 210C · 1400 mm</option>
                   <option value="20C">Steel 20C · 1400 mm pickets</option>
+                  <option value="SDC">Architectural · Samuel-De Champlain · 2400 mm</option>
                 </select></label
               ><label
                 >Right side<select name="rightRailing">
@@ -215,6 +248,7 @@
                   <option value="210A">Steel HSS 210A · 870 mm</option>
                   <option value="210C">Steel HSS 210C · 1400 mm</option>
                   <option value="20C">Steel 20C · 1400 mm pickets</option>
+                  <option value="SDC">Architectural · Samuel-De Champlain · 2400 mm</option>
                 </select></label
               ><label
                 >Traffic protection at sidewalk<select name="sidewalkRailing">
@@ -233,7 +267,9 @@
                 </select></label
               >
               <p class="hint">
-                Steel railings sit on 450 × 280 mm wheel curbs (road face 35 mm in 280 mm); posts at 3 m. Sidewalks are
+                Steel railings sit on 450 × 280 mm wheel curbs (road face 35 mm in 280 mm); posts at 3 m on one grid
+                along the bridge and approaches. The bridge railings always continue to the end of the return walls.
+                The architectural railing leans 12° outwards, white-grey. Sidewalks are
                 280 mm thick with a 1 % crossfall to the road. Pedestrian bridges continue with a wheel curb and 20C
                 railing, or nothing.
               </p>
@@ -361,6 +397,13 @@
             </div>
             <div class="panel-column">
               <h3 class="section-label">Material finish</h3>
+              <label
+                >Concrete finish<select name="concreteFinish">
+                  <option value="rough">Rough · fine aggregate</option>
+                  <option value="formwork">Smooth formwork · panel joints, tie holes</option>
+                  <option value="weathered">Weathered · runoff streaks, darker patina</option>
+                </select></label
+              >
               <div id="steel-color-controls">
                 <label
                   >Steel finish<select name="steelColor">
@@ -487,6 +530,7 @@
                 </select></label
               ><label id="wing-angle-label"
                 >Outward flare · °<input name="wingAngle" type="number" min="0" max="90" step="5" /></label
+              ><label class="check"><input name="girderScreens" type="checkbox" />Girder screens (cache-poutres)</label
               ><label class="check"><input name="frontSlope" type="checkbox" />Slope in front of abutments</label
               ><label
                 >Slope start below seat · m<input name="frontSlopeDrop" type="number" min="0" max="15" step="0.1"
@@ -527,6 +571,11 @@
                 >Sky<select name="skyMode">
                   <option value="clear">Clear gradient</option>
                   <option value="clouds">Dynamic clouds</option>
+                </select></label
+              ><label
+                >Sky model<select name="skyModel">
+                  <option value="stylised">Stylised gradient · tuned golden hour</option>
+                  <option value="physical">Physical · Preetham scattering</option>
                 </select></label
               ><label
                 >River surface<select name="waterStyle">
@@ -625,7 +674,7 @@
           ><label title="Frame rate, CPU and GPU time, draw calls and quality tier"><input id="stats" type="checkbox" />Stats</label>
         </div>
         <div class="export-tools">
-          <button id="image">Snapshot</button><button id="export-glb">Export GLB</button
+          <button id="image" title="Save a high-quality PNG snapshot (lossless)"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3.2l1.6-2.2h6.4L16.8 7H20a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg><span>Snapshot</span></button><button id="export-glb">Export GLB</button
           ><button id="share">Copy link</button>
           <details id="model-info">
             <summary>Model info</summary>
@@ -654,6 +703,18 @@
         <p>A quick visual tool for bridge concepts.</p>
         <p id="about-release"></p>
         <p>By Anthony Chéruel</p>
+        <p class="hint">
+          Starfield and grass species adapted from CK42BB/procedural-stars-threejs and procedural-grass-threejs (MIT);
+          physical sky after Tw1ddle/Sky-Shader and the three.js Sky object (MIT).
+        </p>
+        <h3>Version 0.6.0</h3>
+        <p>
+          Crowned or uniformly sloped deck, continuous girders by default, NEBT intermediate diaphragms and full-width
+          haunches, girder screens, linear cap tapers, the Samuel-De Champlain architectural railing, a 3 m post grid
+          and railings continued over the return walls, crowned and ditched crossing roads (one-way pairs), open-ground
+          spans, a double truck, a seeded starfield, three grass species, concrete finishes, a high-quality PNG snapshot
+          and a phone layout.
+        </p>
         <h3>Version 0.5.6</h3>
         <p>
           Time runs by default (15 min every 5 s, stop with ❚❚), golden hour before sunset (19:00), 1–4 concrete

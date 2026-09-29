@@ -5,8 +5,8 @@ import * as T from 'three';
 // and sun back-lighting through thin tips. The density is budgeted instead of per square metre:
 // tufts concentrate around the bridge and in noise clumps, and the terrain shader carries the same palette.
 
-// Tufts per scene (14 triangles each). Balanced now uses the former High density; High doubles it near the bridge.
-export const grassBudget = { performance: 15000, balanced: 45000, high: 85000 };
+// Tufts per scene (18 triangles each, 31 for reeds). 0.6.0: slightly fewer tufts, each with pointed, tapered blades.
+export const grassBudget = { performance: 14000, balanced: 40000, high: 76000 };
 export const grassUniforms = {
   grassTime: { value: 0 },
   windDirection: { value: new T.Vector2(0.82, 0.57) },
@@ -83,49 +83,119 @@ uniform vec3 sunDirection,sunColor;uniform float backlight;varying float vGrassH
   return material;
 }
 
-// Seven curved, leaning blades of two triangles each; uv.y is the normalised height used by wind and shading.
-export function tuftGeometry() {
-  const position = [],
+// Grass tufts (0.6.0), after CK42BB/procedural-grass-threejs (MIT) species profiles: tapered blades of three
+// triangles (base quad + pointed tip) bent along a quadratic curve; uv.y is the normalised height used by the
+// wind and shading. Kinds: meadow (mixed wild grass), tall (sedges and reeds with cattails on wet river banks),
+// dry (bunch grass with straw tips on slopes and dry patches). Vertex colours carry each species' palette.
+const SPECIES = {
+  meadow: {
+    blades: 6,
+    height: [0.3, 0.46],
+    width: 0.02,
+    bend: [0.1, 0.26],
+    spread: 0.1,
+    root: '#3f5f26',
+    mid: '#739a3c',
+    tip: '#c6d07a',
+    straw: 0.25,
+  },
+  tall: {
+    blades: 5,
+    height: [0.75, 1.25],
+    width: 0.016,
+    bend: [0.05, 0.16],
+    spread: 0.14,
+    root: '#2f4f2a',
+    mid: '#5d8246',
+    tip: '#9fb56a',
+    straw: 0.15,
+    cattails: 1,
+  },
+  dry: {
+    blades: 6,
+    height: [0.34, 0.6],
+    width: 0.018,
+    bend: [0.14, 0.34],
+    spread: 0.12,
+    root: '#5c6a33',
+    mid: '#9aa35a',
+    tip: '#e2cf8c',
+    straw: 0.7,
+  },
+};
+export const grassKinds = Object.keys(SPECIES);
+export function tuftGeometry(kind = 'meadow') {
+  const k = SPECIES[kind] ?? SPECIES.meadow,
+    position = [],
     color = [],
     uv = [],
-    root = new T.Color('#46652a'),
-    mid = new T.Color('#7a9a3e'),
-    tip = new T.Color('#c9cf7c');
-  for (let i = 0; i < 7; i++) {
-    const a = i * 2.39996 + 0.3,
-      offset = 0.02 + (0.09 * ((i * 37) % 7)) / 7,
-      height = 0.62 + (0.38 * ((i * 53) % 7)) / 6,
+    root = new T.Color(k.root),
+    mid = new T.Color(k.mid),
+    tip = new T.Color(k.tip),
+    straw = new T.Color('#d8c27a');
+  const colourAt = (t, tone, dry) => {
+    const c = t < 0.5 ? root.clone().lerp(mid, t / 0.5) : mid.clone().lerp(tip, (t - 0.5) / 0.5);
+    return c.lerp(straw, dry * Math.max(0, t - 0.35) * 1.5).multiplyScalar(tone);
+  };
+  for (let i = 0; i < k.blades; i++) {
+    const f = n => (((i + 1) * n) % 97) / 97,
+      a = i * 2.39996 + 0.3,
       dx = Math.cos(a),
-      dz = Math.sin(a);
-    const h = 0.4 * height,
-      w = 0.018 * (0.8 + (0.4 * ((i * 19) % 5)) / 4),
-      bend = (0.12 + (0.18 * ((i * 29) % 4)) / 3) * height,
-      rootX = dx * offset,
-      rootZ = dz * offset,
-      twist = (((i * 13) % 5) - 2) * 0.25;
-    const points = [
-      [-w, 0, 0],
-      [w, 0, 0],
-      [-w * 0.35 + twist * w, 0.62, 0.55],
-      [twist * w, 1, 1],
-    ];
-    const vertex = ([side, t, curve]) => [
-      rootX + dx * bend * curve * curve - dz * side,
-      h * t * (1 - 0.18 * curve * curve),
-      rootZ + dz * bend * curve * curve + dx * side,
-    ];
-    for (const k of [0, 1, 2, 1, 3, 2]) {
-      const q = points[k],
-        t = q[1];
-      position.push(...vertex(q));
-      uv.push(q[0] > 0 ? 1 : 0, t);
-      // Per-blade tone: alternate lush and pale blades, a few straw-tipped ones.
-      const tone = [1, 0.86, 1.08, 0.94, 1.12, 0.9, 1][i],
-        straw = i === 2 || i === 5 ? 0.45 : 0,
-        c = t < 0.55 ? root.clone().lerp(mid, t / 0.55) : mid.clone().lerp(tip, (t - 0.55) / 0.45);
-      c.lerp(new T.Color('#d8c27a'), straw * Math.max(0, t - 0.5) * 2).multiplyScalar(tone);
-      color.push(c.r, c.g, c.b);
-    }
+      dz = Math.sin(a),
+      offset = 0.015 + k.spread * f(37),
+      h = k.height[0] + (k.height[1] - k.height[0]) * f(53),
+      w = k.width * (0.8 + 0.4 * f(19)),
+      bend = k.bend[0] + (k.bend[1] - k.bend[0]) * f(29),
+      tone = 0.86 + 0.28 * f(71),
+      dry = f(13) < k.straw ? 0.7 : 0;
+    // Point on the blade: across ∈ [-1, 1], t ∈ [0, 1] up the blade; width tapers, the blade bends outwards.
+    const vertex = (across, t) => {
+      const lean = bend * t * t,
+        half = w * (1 - 0.75 * t);
+      return [dx * (offset + lean) - dz * across * half, h * t * (1 - 0.2 * t * t * bend / 0.3), dz * (offset + lean) + dx * across * half];
+    };
+    const tri = (...pts) => {
+      for (const [across, t] of pts) {
+        position.push(...vertex(across, t));
+        uv.push(across > 0 ? 1 : 0, t);
+        const c = colourAt(t, tone, dry);
+        color.push(c.r, c.g, c.b);
+      }
+    };
+    tri([-1, 0], [1, 0], [1, 0.55]);
+    tri([-1, 0], [1, 0.55], [-1, 0.55]);
+    tri([-1, 0.55], [1, 0.55], [0, 1]);
+  }
+  // Cattails: a brown spike on a thin stem (two crossed quads each).
+  for (let j = 0; j < (k.cattails ?? 0); j++) {
+    const a = j * 2.7 + 1.1,
+      ox = Math.cos(a) * 0.06,
+      oz = Math.sin(a) * 0.06,
+      top = 1.25,
+      brown = new T.Color('#5a3a22'),
+      stem = new T.Color('#6f7f46');
+    for (const [cx, cz] of [
+      [1, 0],
+      [0, 1],
+    ])
+      for (const [y0, y1, r, c] of [
+        [0, top - 0.2, 0.005, stem],
+        [top - 0.2, top, 0.021, brown],
+      ]) {
+        const p = (s, y) => [ox + cx * s * r, y, oz + cz * s * r];
+        for (const [s, y] of [
+          [-1, y0],
+          [1, y0],
+          [1, y1],
+          [-1, y0],
+          [1, y1],
+          [-1, y1],
+        ]) {
+          position.push(...p(s, y));
+          uv.push(s > 0 ? 1 : 0, y / top);
+          color.push(c.r, c.g, c.b);
+        }
+      }
   }
   const g = new T.BufferGeometry();
   g.setAttribute('position', new T.Float32BufferAttribute(position, 3));
@@ -179,7 +249,7 @@ function valueNoise(seed) {
 }
 
 // Budgeted placement: dense near the bridge and in clumps, thinner towards the diorama edge.
-export function scatterMeadow({ extent, halfZ, rng, occupied, height, budget, seed = 1 }) {
+export function scatterMeadow({ extent, halfZ, rng, occupied, height, budget, seed = 1, zone = () => 'meadow' }) {
   const noise = valueNoise(seed),
     items = [],
     flowers = [],
@@ -195,7 +265,10 @@ export function scatterMeadow({ extent, halfZ, rng, occupied, height, budget, se
     if (rng() > focus * clump || occupied(x, z, 0.4)) continue;
     const s = 0.75 + rng() * 0.5 + clump * 0.3,
       dry = noise(x * 0.03 + 40, z * 0.03);
-    items.push({ x, z, y: height(x, z) - 0.02, s, r: rng() * Math.PI * 2, dry });
+    // Species by site: tall sedges and reeds on wet banks, bunch grass on slopes and dry patches, meadow elsewhere.
+    let kind = zone(x, z, dry);
+    if (kind === 'meadow' && dry > 0.68) kind = 'dry';
+    items.push({ x, z, y: height(x, z) - 0.02, s, r: rng() * Math.PI * 2, dry, kind });
     if (rng() < 0.035)
       flowers.push({
         x: x + (rng() - 0.5) * 0.4,

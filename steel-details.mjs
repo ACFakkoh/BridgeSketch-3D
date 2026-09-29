@@ -1,6 +1,6 @@
 // BridgeSketch 3D · Steel details: cross-frame angles, web offsets and transverse stiffeners.
 import * as T from 'three';
-import { supportStation, girderTop, girderDepth } from './geometry.mjs';
+import { crossAt, supportStation, girderTop, girderDepth } from './geometry.mjs';
 import { skewPlate } from './sections.mjs';
 
 export function bracingMember(parent, mat, a, b) {
@@ -46,8 +46,8 @@ function webOffset(c, i, s, u, y) {
 export // Vertical 14 mm transverse stiffener, full local web height, in the skewed plane.
 function webStiffener(parent, mat, c, i, s, u, face) {
   const station = supportStation(c, s, u),
-    top = girderTop(c, i, station) - 0.05,
-    bottom = girderTop(c, i, station) - girderDepth(c, station, u) + 0.05,
+    top = girderTop(c, i, station) + crossAt(c, u) - 0.05,
+    bottom = girderTop(c, i, station) + crossAt(c, u) - girderDepth(c, station, u) + 0.05,
     inner = u + (face * c.web) / 2,
     outer = u + face * (c.web / 2 + 0.2);
   return skewPlate(

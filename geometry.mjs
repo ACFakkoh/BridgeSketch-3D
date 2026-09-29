@@ -14,7 +14,7 @@ export const defaults = {
   asphalt: 0.065,
   haunch: 0.05,
   barrier: 1.1,
-  continuous: false,
+  continuous: true,
   variableDepth: false,
   pierDepth: 2.4,
   taper: 30,
@@ -90,6 +90,18 @@ export const defaults = {
   archSpan: -1,
   archRise: 0.18,
   psboxCount: 1,
+  // 0.6.0: deck crossfall — crown (2 % each way from the crown line) or a uniform 2 / 3 / 4 % slope falling to
+  // the left or right; crownOffset moves the crown (profile grade) line across the deck, 0 = deck centreline.
+  crossfall: 'crown',
+  crossSlope: 2,
+  crownOffset: 0,
+  // Line between opposing directions: dashed yellow or a solid double yellow line.
+  centreLine: 'dashed',
+  // Concrete surface: rough (Poly Haven), smooth formwork with panel joints and tie holes, or weathered.
+  concreteFinish: 'rough',
+  // Concrete girder screens (cache-poutres) at the abutments, flush under the deck edge.
+  girderScreens: true,
+  skyModel: 'stylised',
   spans: [25, 25, 25].map(length => ({ length, obstacle: 'water', width: 22, elevation: 0, angle: 90 })),
 };
 export const depths = [1, 1.2, 1.4, 1.6, 1.8];
@@ -270,6 +282,19 @@ export const terrainBase = c => Math.min(-1.5, ...c.spans.map(s => s.elevation -
 export const approachDrop = (c, s, base = terrainBase(c)) => Math.max(0.5, profile(c, s) - base - 0.17);
 export const approachToeOffset = (c, s, base = terrainBase(c)) => 2 * approachDrop(c, s, base);
 const rad = d => (d * Math.PI) / 180;
+// Vertical offset of the deck surface at u (m across) relative to the profile grade line: crown with 2 % on
+// each side of the crown line, or a uniform crossfall. Everything built on the deck follows it.
+export function crossAt(c, u) {
+  const d = u - (c.crownOffset ?? 0);
+  if (c.crossfall === 'crown') return -0.02 * Math.abs(d);
+  if (c.crossfall === 'right') return (-(c.crossSlope ?? 2) / 100) * d;
+  if (c.crossfall === 'left') return ((c.crossSlope ?? 2) / 100) * d;
+  return 0;
+}
+// Lowest deck offset across the width (conservative clearance).
+export const lowestCross = c => Math.min(crossAt(c, -c.width / 2), crossAt(c, c.width / 2), crossAt(c, 0));
+// Obstacles under a span: water, road, railway or open ground (terrain vague, no crossing).
+export const obstacleTypes = ['water', 'road', 'rail', 'land'];
 export function validate(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw))
     throw Error('Choose a BridgeSketch 3D JSON configuration.');
@@ -317,6 +342,15 @@ export function validate(raw) {
   )
     throw Error('Select traffic, water and sky styles.');
   if (!['auto', 'performance', 'balanced', 'high'].includes(c.renderQuality)) throw Error('Select a render quality.');
+  if (!['crown', 'left', 'right', 'flat'].includes(c.crossfall)) throw Error('Select a crown or a uniform crossfall.');
+  c.crossSlope = Number(c.crossSlope);
+  if (![2, 3, 4].includes(c.crossSlope)) throw Error('Uniform crossfall: select 2, 3 or 4 %.');
+  if (typeof c.crownOffset !== 'number' || !Number.isFinite(c.crownOffset) || Math.abs(c.crownOffset) > c.width / 2)
+    throw Error('Crown line: enter an offset within the deck width.');
+  if (!['dashed', 'double'].includes(c.centreLine)) throw Error('Select a dashed or double yellow centre line.');
+  if (!['rough', 'formwork', 'weathered'].includes(c.concreteFinish)) throw Error('Select a concrete finish.');
+  if (typeof c.girderScreens !== 'boolean') throw Error('Invalid girder screen option.');
+  if (!['stylised', 'physical'].includes(c.skyModel)) throw Error('Select a sky model.');
   const cycling = c.trafficMode === 'cyclists';
   const limits = {
     width: [cycling ? 3 : 4, 30],
@@ -371,8 +405,8 @@ export function validate(raw) {
   )
     throw Error('Invalid abutment slope finish.');
   if (
-    !['201', '301', '311', '311A', '210A', '210C', '20C'].includes(c.leftRailing) ||
-    !['201', '301', '311', '311A', '210A', '210C', '20C'].includes(c.rightRailing) ||
+    !['201', '301', '311', '311A', '210A', '210C', '20C', 'SDC'].includes(c.leftRailing) ||
+    !['201', '301', '311', '311A', '210A', '210C', '20C', 'SDC'].includes(c.rightRailing) ||
     !['none', '301', '210A', '210C', '20C'].includes(c.sidewalkRailing)
   )
     throw Error('Invalid railing selection.');
@@ -475,7 +509,7 @@ export function validate(raw) {
     }))
       if (typeof v[k] !== 'number' || !Number.isFinite(v[k]) || v[k] < lo || v[k] > hi)
         throw Error(`Span ${i + 1} ${k}: enter ${lo} to ${hi}.`);
-    if (!['road', 'rail', 'water'].includes(v.obstacle)) throw Error(`Span ${i + 1}: select road, railway or water.`);
+    if (!obstacleTypes.includes(v.obstacle)) throw Error(`Span ${i + 1}: select road, railway, water or open ground.`);
     return v;
   });
   // Box girder: bearings under the webs (two, or three with a centre web), set from the section at the supports.
@@ -528,7 +562,7 @@ export function validate(raw) {
       throw Error('Adjacent water spans must have the same river direction.');
   for (let i = 0; i < c.spans.length; i++) {
     const s = c.spans[i];
-    if (s.obstacle !== 'water' && s.width / Math.sin(rad(s.angle)) > s.length - 3)
+    if ((s.obstacle === 'road' || s.obstacle === 'rail') && s.width / Math.sin(rad(s.angle)) > s.length - 3)
       throw Error(`Span ${i + 1}: the crossing is too wide for this span and angle.`);
   }
   for (let i = 0; i < c.spans.length; i++)
@@ -615,7 +649,7 @@ export function clearance(c, i) {
   const depth = c.variableDepth ? c.pierDepth : c.material === 'slab' ? c.slabDepth : c.depth;
   // Railways: clearance above the 0.5 m ballast bed (sleeper level), not the surrounding ground.
   const obstacleTop = c.spans[i].elevation + (c.spans[i].obstacle === 'rail' ? RAIL_BED : 0);
-  return Math.min(...edgeStations.map(s => girderTop(c, i, s))) - depth - 0.2 - obstacleTop;
+  return Math.min(...edgeStations.map(s => girderTop(c, i, s))) + lowestCross(c) - depth - 0.2 - obstacleTop;
 }
 // Smooth bottom-flange haunches, measured from each girder's skewed pier intersection.
 export function girderDepth(c, s, u = 0) {
