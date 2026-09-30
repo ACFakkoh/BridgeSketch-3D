@@ -10,7 +10,7 @@ try {
   exit 1
 }
 
-$mime = @{ '.css'='text/css; charset=utf-8'; '.html'='text/html; charset=utf-8'; '.js'='text/javascript; charset=utf-8'; '.json'='application/json'; '.mjs'='text/javascript; charset=utf-8'; '.svg'='image/svg+xml'; '.webp'='image/webp' }
+$mime = @{ '.css'='text/css; charset=utf-8'; '.html'='text/html; charset=utf-8'; '.js'='text/javascript; charset=utf-8'; '.json'='application/json'; '.mjs'='text/javascript; charset=utf-8'; '.svg'='image/svg+xml'; '.webp'='image/webp'; '.png'='image/png' }
 if (-not $NoBrowser) { try { Start-Process "http://127.0.0.1:$Port/" -ErrorAction Stop } catch { Write-Host "Open http://127.0.0.1:$Port/ in your browser." } }
 Write-Host "BridgeSketch 3D: http://127.0.0.1:$Port/ . Keep this window open. Press Ctrl+C to stop."
 

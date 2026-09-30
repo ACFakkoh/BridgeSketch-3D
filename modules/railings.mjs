@@ -186,7 +186,7 @@ export function barrierRail(parent, m, c, a, b, edge, side, base, run = {}) {
 // Architectural railing « Samuel-De Champlain » (SDC): 2.4 m high, leaning outwards (12°), flat-bar posts at
 // 3 m, a 200 mm round top rail, a 100 mm handrail at 1.1 m and a bottom rail, fine vertical balusters between
 // them; white-grey paint. base: level of the anchor (curb or sidewalk top) above the road surface.
-export const SDC = { height: 2.4, lean: Math.tan((12 * Math.PI) / 180), spacing: 3, baluster: 0.11 };
+export const SDC = { height: 2.4, lean: Math.tan((12 * Math.PI) / 180), spacing: 3, balusters: 17, handrail: 1.1 };
 export function architecturalRailing(parent, m, c, a, b, edge, side, base, run = {}) {
   const u0 = edge - side * 0.2,
     at = h => u0 + side * h * SDC.lean,
@@ -194,25 +194,34 @@ export function architecturalRailing(parent, m, c, a, b, edge, side, base, run =
     surface = (_, q) => profile(c, q) + base;
   for (const [h, r] of [
     [SDC.height - 0.1, 0.1],
-    [1.1, 0.05],
+    [SDC.handrail, 0.05],
     [0.14, 0.04],
   ])
     parent.add(sweep(c, a, b, tube(at(h), h, r), mat, surface, undefined, u0));
   // Handrail on the inner face for cyclists and pedestrians.
-  parent.add(sweep(c, a, b, tube(at(1.1) - side * 0.09, 1.1, 0.03), mat, surface, undefined, u0));
+  parent.add(sweep(c, a, b, tube(at(SDC.handrail) - side * 0.09, SDC.handrail, 0.03), mat, surface, undefined, u0));
   const point = (q, h) => {
     const uu = at(h),
       s = supportStation(c, q, uu),
       f = frame(c, s, uu);
     return [f.x, profile(c, s) + crossAt(c, u0) + base + h, f.z];
   };
-  for (const q of postStations(a, b, SDC.spacing, run)) {
+  const posts = postStations(a, b, SDC.spacing, run);
+  for (const q of posts) {
     const f = frame(c, supportStation(c, q, u0), u0);
     strut(parent, mat, point(q, 0), point(q, SDC.height - 0.1), [f.tx, f.tz], 0.035, 0.2);
     box(parent, m.dark, ...point(q, 0.015), 0.28, 0.03, 0.28, -Math.atan2(f.tz, f.tx));
   }
-  for (let q = a + SDC.baluster / 2; q < b; q += SDC.baluster) {
-    const f = frame(c, supportStation(c, q, u0), u0);
-    strut(parent, mat, point(q, 0.14), point(q, SDC.height - 0.18), [f.tx, f.tz], 0.012, 0.012);
-  }
+  // Include the neighbouring grid posts when this mesh covers only part of a bay (span joints).
+  const origin = run.origin ?? a;
+  if (!(run.capStart ?? true)) posts.unshift(origin + Math.floor((a - origin) / SDC.spacing) * SDC.spacing);
+  if (!(run.capEnd ?? true)) posts.push(origin + Math.ceil((b - origin) / SDC.spacing) * SDC.spacing);
+  for (let i = 1; i < posts.length; i++)
+    for (let j = 1; j <= SDC.balusters; j++) {
+      const q = posts[i - 1] + (posts[i] - posts[i - 1]) * j / (SDC.balusters + 1);
+      if (q < a || q >= b || posts[i] - posts[i - 1] < 1e-6) continue;
+      const f = frame(c, supportStation(c, q, u0), u0),
+        bar = strut(parent, mat, point(q, 0.14), point(q, SDC.height - 0.18), [f.tx, f.tz], 0.012, 0.012);
+      bar.name = 'SDC baluster';
+    }
 }

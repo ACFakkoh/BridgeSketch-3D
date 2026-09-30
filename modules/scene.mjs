@@ -22,10 +22,11 @@ export {
   crossingCorridors,
 } from './terrain.mjs';
 import * as T from 'three';
-import { mergeGeometries } from './vendor/BufferGeometryUtils.js';
-import { vehicleKinds } from './vehicles.mjs';
+import { mergeGeometries } from '../vendor/BufferGeometryUtils.js';
+import { trafficKind } from './vehicles.mjs';
 import {
   frame,
+  alignmentStation,
   profile,
   totalLength,
   stations,
@@ -39,6 +40,7 @@ import {
   monolithicSupport,
   bearingPositions,
   crossAt,
+  crossfallSection,
 } from './geometry.mjs';
 import { addArch, addPsbox, addStrutLeg } from './systems.mjs';
 import { addEnvironment, approachSurfaces, frontSlopeFit, terrainSampler } from './terrain.mjs';
@@ -67,7 +69,7 @@ import { concreteBarrier, edgeWidth, isConcrete, sidewalkProfile, sidewalkTop } 
 import { bracingMember, webOffset, webStiffener } from './steel-details.mjs';
 import { vehicle } from './traffic.mjs';
 import { buildLighting } from './lighting.mjs';
-import { concreteFinish } from './materials.mjs';
+import { concreteFinishes } from './materials.mjs';
 
 export function buildBridge(c, m, { batch = true } = {}) {
   const preview = approachSurfaces(c),
@@ -88,9 +90,8 @@ export function buildBridge(c, m, { batch = true } = {}) {
   // Edge (fascia) girders can carry their own finish; interior girders keep the main one.
   const steelFor = g =>
     c.fasciaColor !== 'same' && (g === 0 || g === c.girders - 1) ? m.steelFascia : m.steel;
-  // Concrete finish: rough aggregate, smooth formwork (flatter normal map) or weathered.
-  concreteFinish.value = { rough: 0, formwork: 1, weathered: 2 }[c.concreteFinish] ?? 0;
-  for (const mat of [m.concrete, m.edge]) mat.normalScale?.setScalar(c.concreteFinish === 'formwork' ? 0.12 : 0.32);
+  // Concrete colour changes preserve the existing diffuse, normal and roughness maps.
+  for (const mat of [m.concrete, m.edge]) mat.color.set(concreteFinishes[c.concreteFinish] ?? mat.userData.originalColor);
   const waterSpans = c.spans.filter(span => span.obstacle === 'water');
   m.grass.userData.waterLevel.value = waterSpans.length ? Math.min(...waterSpans.map(span => span.elevation)) : -1e4;
   m.grass.userData.lawn.value = c.environment === 'urban' ? 1 : 0;
@@ -248,8 +249,8 @@ export function buildBridge(c, m, { batch = true } = {}) {
             c.material === 'concrete'
               ? station => nebtSection(girderDepth(c, supportStation(c, station, u), u)).map(([x, y]) => [x + u, y])
               : steelSection(c.depth, c.web).map(([x, y]) => [x + u, y]);
-          const top = (_, s, v, u) =>
-            girderTop(c, i, s) + (c.material === 'steel' && v < -0.05 ? c.depth - girderDepth(c, s, u) : 0);
+          const top = (_, s, v, across) =>
+            girderTop(c, i, s, u) + (c.material === 'steel' && v < -0.05 ? c.depth - girderDepth(c, s, across) : 0);
           const girder = addSweep(
             structure,
             a + 0.22,
@@ -257,16 +258,15 @@ export function buildBridge(c, m, { batch = true } = {}) {
             section,
             c.material === 'concrete' ? m.concrete : steelFor(g),
             top,
-            c.material === 'concrete' && !c.variableDepth ? 1 : undefined,
+            undefined,
             u,
           );
           girder.name = `Span ${i + 1} girder ${g + 1}`;
         }
       }
-      // Fill from the straight girder chord to the deck profile; the top follows the deck crossfall, the bottom
-      // sits level on the flange (the girder is lifted by the crossfall at its centreline).
+      // Level NEBT / I flanges and profile-following box flanges stay in contact with the concrete haunch.
       const haunchHeight = (_, s, v, uu) =>
-        v > -0.5 ? profile(c, s) - c.asphalt - c.deck + crossAt(c, uu) : girderTop(c, i, s) + 1 + crossAt(c, u);
+        v > -0.5 ? profile(c, s) - c.asphalt - c.deck + crossAt(c, uu) : girderTop(c, i, s, u) + 1 + crossAt(c, c.material === 'box' ? uu : u);
       for (const side of c.material === 'box' ? [-1, 1] : [0]) {
         const section = station => {
           const flange =
@@ -281,7 +281,7 @@ export function buildBridge(c, m, { batch = true } = {}) {
               : c.material === 'concrete'
                 ? rect(-0.6, 0.6, 0, -0.05) // NEBT: the haunch covers the full 1200 mm top flange
                 : rect(-0.25, 0.25, 0, -0.05);
-          return chamferSection(rect(u + flange[0][0], u + flange[1][0], 0, -1));
+          return crossfallSection(c, rect(u + flange[0][0], u + flange[1][0], 0, -1));
         };
         addSweep(
           haunches,
@@ -306,7 +306,7 @@ export function buildBridge(c, m, { batch = true } = {}) {
       const s = a + ((b - a) * n) / frames;
       for (let g = 0; g < c.girders - 1; g++) {
         const u = -half + c.overhang + g * gspace,
-          top = girderTop(c, i, s) - 0.13,
+          top = Math.min(girderTop(c, i, s, u), girderTop(c, i, s, u + gspace)) - 0.13,
           bot = top - Math.min(girderDepth(c, s, u), girderDepth(c, s, u + gspace)) + 0.26,
           xu = crossAt(c, u),
           xv = crossAt(c, u + gspace);
@@ -364,7 +364,7 @@ export function buildBridge(c, m, { batch = true } = {}) {
           }
         } else {
           // 250 mm concrete diaphragm between the webs, from the slab down to 250 mm above the bottom flange.
-          const girderTopAt = girderTop(c, i, s);
+          const girderTopAt = Math.min(girderTop(c, i, s, u), girderTop(c, i, s, u + gspace));
           crossPlate(
             structure,
             m.concrete,
@@ -392,7 +392,7 @@ export function buildBridge(c, m, { batch = true } = {}) {
         const type =
             c.trafficMode === 'cyclists'
               ? 'cyclist'
-              : vehicleKinds[(i * c.laneCount + lane + c.seed) % vehicleKinds.length],
+              : trafficKind(i * c.laneCount + lane + c.seed),
           s = a + (b - a) * (lane % 2 ? 0.65 : 0.35);
         vehicle(deck, m, c, s, u, type, laneForward(c, lane));
       });
@@ -409,7 +409,7 @@ export function buildBridge(c, m, { batch = true } = {}) {
           L - 0.25,
           steelSection(c.depth, c.web).map(([x, y]) => [x + u, y]),
           steelFor(g),
-          (_, s, v, u) => girderTop(c, 0, s) + (v < -0.05 ? c.depth - girderDepth(c, s, u) : 0),
+          (_, s, v, across) => girderTop(c, 0, s, u) + (v < -0.05 ? c.depth - girderDepth(c, s, across) : 0),
           undefined,
           u,
         );
@@ -427,10 +427,10 @@ export function buildBridge(c, m, { batch = true } = {}) {
         : [-0.55, 0.55]
       : [j === 0 ? 0.5 : -0.5];
     const spanOf = side => Math.max(0, Math.min(c.spans.length - 1, side < 0 ? j - 1 : j));
-    // Every bearing: 75 mm pad on a constant 150 mm plinth. The support top follows
-    // the plinth undersides across the deck and between bearing lines.
+    // The common bearing seat stays level; individual plinths take up the crossfall and grade (100 mm minimum).
     const padBottom = (u, side) => soffitAt(c, spanOf(side), supportStation(c, s, u) + side, u) - (mono ? 0 : 0.075);
-    const seatLine = (u, side) => padBottom(u, side) - (mono ? -0.05 : 0.15);
+    const seatLevel = Math.min(...bearingPositions(c).flatMap(u => lines.map(side => padBottom(u, side)))) - 0.1;
+    const seatLine = (u, side) => mono ? padBottom(u, side) + 0.05 : seatLevel;
     const seatAt = (u, offset = 0) => {
       if (lines.length === 1) return seatLine(u, lines[0]);
       const a = seatLine(u, lines[0]),
@@ -467,7 +467,7 @@ export function buildBridge(c, m, { batch = true } = {}) {
           Math.max(seatAt(u) + 0.2, profile(c, supportStation(c, s + direction * 0.8, u) + offset) - 0.17 + crossAt(c, u)),
       );
       backwall.name = 'Profile-following backwall';
-      if (c.frontSlope) {
+      if (c.frontSlope && c.approachWalls !== 'mse') {
         // 2H:1V spill slope from the abutment face to the ground, on the same toe line as the quarter cones.
         const fit = frontSlopeFit(c, s),
           reach = fit.reach + 2,
@@ -485,7 +485,7 @@ export function buildBridge(c, m, { batch = true } = {}) {
         slope.name = 'Slope in front of abutment';
         setting.add(slope);
       }
-      for (const side of [-1, 1]) {
+      for (const side of c.approachWalls === 'mse' ? [] : [-1, 1]) {
         const u = side * (half - 0.3),
           p0 = supportPoint(c, s, u, 0),
           f = frame(c, supportStation(c, s, u), u),
@@ -555,14 +555,13 @@ export function buildBridge(c, m, { batch = true } = {}) {
         capWidth = bent ? c.bentWidth : c.hammerheadThickness;
       // Outer columns at the chosen spacing (auto: 64 % of the deck), the others equally spaced.
       const spread = c.columnSpread > 0 ? c.columnSpread : c.width * 0.64;
-      // Bent cap: constant thickness between the columns, then a straight (linear) taper from the outer column
-      // face to the end thickness at the tip of the cantilever.
+      // Bent cap: user-selected transverse start of the straight taper; zero retains the automatic column-face start.
+      const tip = half - 0.15,
+        taperStart = c.bentTaperStart > 0 ? c.bentTaperStart : Math.min(tip - 0.3, c.columns > 1 ? spread / 2 + c.columnDiameter / 2 : c.columnDiameter / 2);
       const capDepthAt = u => {
         if (integral) return 0;
         if (!bent) return capHeight;
-        const tip = half - 0.15,
-          start = Math.min(tip - 0.3, c.columns > 1 ? spread / 2 + c.columnDiameter / 2 : c.columnDiameter / 2),
-          t = Math.max(0, Math.min(1, (Math.abs(u) - start) / Math.max(0.01, tip - start)));
+        const t = Math.max(0, Math.min(1, (Math.abs(u) - taperStart) / Math.max(0.01, tip - taperStart)));
         return c.bentThickness + (c.bentEndThickness - c.bentThickness) * t;
       };
       if (!integral) {
@@ -576,6 +575,7 @@ export function buildBridge(c, m, { batch = true } = {}) {
           capWidth,
           (u, offset) => seatAt(u, offset) - capDepthAt(u),
           (u, offset) => seatAt(u, offset),
+          [-taperStart, taperStart],
         );
         cap.name = 'Pier cap';
       }
@@ -642,21 +642,23 @@ export function buildBridge(c, m, { batch = true } = {}) {
         const sg = supportStation(c, s, u) + side,
           f = frame(c, sg, u),
           underside = padBottom(u, side);
-        // Bearings are fixed 75 mm elastomeric pads on 150 mm plinths, aligned to the local support.
+        // Fixed 75 mm elastomeric pads; plinth height varies to meet each beam on the common support seat.
         const bearing = supportBasis(c, s, u);
         box(structure, m.dark, f.x, underside + 0.0375, f.z, 0.55, 0.075, 0.48, bearing.angle - Math.PI / 2);
+        const height = Math.max(0.1, underside - seatAt(u, side));
         const plinth = box(
           structure,
           m.concrete,
           f.x,
-          underside - 0.075,
+          underside - height / 2,
           f.z,
           0.8,
-          0.15,
+          height,
           0.72,
           bearing.angle - Math.PI / 2,
         );
         plinth.name = 'Bearing plinth';
+        plinth.userData.height = height;
       }
     if (c.material !== 'slab' && c.material !== 'psbox')
       for (const side of lines) {
@@ -674,20 +676,19 @@ export function buildBridge(c, m, { batch = true } = {}) {
           for (let g = 0; g < c.girders; g++) {
             const u = -half + c.overhang + g * gspace,
               st = supportStation(c, line, u),
-              yt = girderTop(c, k, st) - 0.05,
-              yb = girderTop(c, k, st) - girderDepth(c, st, u) + 0.05,
-              inside = y => webOffset(c, k, line, u, y) - c.web,
-              x = crossAt(c, u);
+              yt = girderTop(c, k, st, u) - 0.05,
+              yb = girderTop(c, k, st, u) - girderDepth(c, st, u) + 0.05,
+              inside = y => webOffset(c, k, line, u, y) - c.web;
             skewPlate(
               structure,
               m.steel,
               c,
               line,
               [
-                [u - inside(yt), yt + x],
-                [u + inside(yt), yt + x],
-                [u + inside(yb), yb + x],
-                [u - inside(yb), yb + x],
+                [u - inside(yt), yt + crossAt(c, u - inside(yt))],
+                [u + inside(yt), yt + crossAt(c, u + inside(yt))],
+                [u + inside(yb), yb + crossAt(c, u + inside(yb))],
+                [u - inside(yb), yb + crossAt(c, u - inside(yb))],
               ],
               0.025,
               'Box internal diaphragm',
@@ -699,8 +700,8 @@ export function buildBridge(c, m, { batch = true } = {}) {
             v = u + gspace,
             su = supportStation(c, line, u),
             sv = supportStation(c, line, v);
-          const top = Math.min(girderTop(c, k, su), girderTop(c, k, sv)),
-            soffit = Math.max(girderTop(c, k, su) - girderDepth(c, su, u), girderTop(c, k, sv) - girderDepth(c, sv, v));
+          const top = Math.min(girderTop(c, k, su, u), girderTop(c, k, sv, v)),
+            soffit = Math.max(girderTop(c, k, su, u) - girderDepth(c, su, u), girderTop(c, k, sv, v) - girderDepth(c, sv, v));
           if (c.material === 'concrete') {
             crossPlate(structure, m.concrete, c, line, u + 0.1, v - 0.1, () => top - 0.05, () => soffit + 0.3, 0.45, 'Concrete end diaphragm');
             continue;
@@ -768,6 +769,33 @@ export function buildBridge(c, m, { batch = true } = {}) {
       start = a < 0,
       end = start ? 0 : L,
       dir = start ? -1 : 1;
+    if (c.approachWalls === 'mse') {
+      const mat = mseWallMaterial(m.concrete),
+        ground = terrainSampler(c);
+      for (const side of [-1, 1]) {
+        const u = side * (half - 0.3),
+          wall = sweep(
+            c,
+            a,
+            b,
+            rect(u - 0.225, u + 0.225, 0, -1),
+            mat,
+            (_, station, v, across) => {
+              const f = frame(c, station, across);
+              return v === 0 ? profile(c, station) - 0.17 + crossAt(c, across) : ground(f.x, f.z) - 0.25 + 1;
+            },
+            Math.ceil(b - a),
+            false,
+          );
+        wall.name = 'MSE approach wall';
+        const pos = wall.geometry.attributes.position,
+          uv = wall.geometry.attributes.uv;
+        for (let i = 0; i < pos.count; i++)
+          uv.setXY(i, alignmentStation(c, pos.getX(i), pos.getZ(i)), pos.getY(i));
+        clipMeshAtCut(wall, start ? -fills.extent / 2 : fills.extent / 2, start, true);
+        structure.add(wall);
+      }
+    }
     // The sidewalk protection continues on the approaches only with the bridge railings; otherwise the
     // pavement runs up to the sidewalk face (no open strip where a Type 301 barrier stood on the deck).
     const paveEdge = side => (innerOnApproach ? (side < 0 ? roadMin : roadMax) : sidewalkFace(side));
@@ -876,6 +904,32 @@ export function buildBridge(c, m, { batch = true } = {}) {
   };
 }
 
+// TSM / MSE reference: staggered concrete panels, dark joints and alternating inset ribbed strips.
+function mseWallMaterial(concrete) {
+  const mat = concrete.clone(),
+    previous = concrete.onBeforeCompile;
+  mat.userData = { ...concrete.userData, chamfer: false, noBatch: true, ownedMaterial: true };
+  mat.customProgramCacheKey = () => concrete.customProgramCacheKey() + '|mse-panels';
+  mat.onBeforeCompile = (shader, renderer) => {
+    previous.call(mat, shader, renderer);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 mseUV;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nmseUV=uv;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 mseUV;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        vec2 panel=mseUV/vec2(2.4,1.2);panel.x+=mod(floor(panel.y),2.)*.5;
+        vec2 tile=floor(panel),p=fract(panel),edge=min(p,1.-p)*vec2(2.4,1.2);
+        float joint=1.-smoothstep(.003,.014,min(edge.x,edge.y));
+        float variant=fract(sin(dot(tile,vec2(127.1,311.7)))*43758.5453);
+        float band=1.-smoothstep(.055,.08,abs(p.y-(.18+.6*variant)));
+        float ribs=.72+.1*sin(mseUV.y*420.);
+        diffuseColor.rgb*=mix(1.+(variant-.5)*.08,ribs,band)*(1.-.45*joint);
+      `);
+  };
+  return mat;
+}
+
 // Merge repeated static surfaces by material while preserving the three visibility layers.
 function batchMeshes(group) {
   group.updateMatrixWorld(true);
@@ -936,11 +990,14 @@ export function frameShadows(sun, model) {
 export function disposeModel(model) {
   if (!model) return;
   model.lighting?.dispose();
-  const geometries = new Set();
+  const geometries = new Set(),
+    materials = new Set();
   model.root.traverse(o => {
     // Cached EZ-Tree geometries are shared between rebuilds.
     if (o.geometry && !o.userData.sharedGeometry) geometries.add(o.geometry);
     o.customDepthMaterial?.dispose();
+    if (o.material?.userData.ownedMaterial) materials.add(o.material);
   });
   geometries.forEach(g => g.dispose());
+  materials.forEach(m => m.dispose());
 }

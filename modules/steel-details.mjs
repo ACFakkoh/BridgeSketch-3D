@@ -36,7 +36,7 @@ export // Horizontal distance from a girder centre to its web face at level y; b
 function webOffset(c, i, s, u, y) {
   if (c.material !== 'box') return c.material === 'steel' ? c.web / 2 + 0.05 : 0.06;
   const station = supportStation(c, s, u),
-    top = girderTop(c, i, station),
+    top = girderTop(c, i, station, u),
     depth = girderDepth(c, station, u),
     t = Math.max(0, Math.min(1, (top - 0.05 - y) / Math.max(0.01, depth - 0.1))),
     upper = c.boxTopWidth / 2 - 0.25;
@@ -46,8 +46,8 @@ function webOffset(c, i, s, u, y) {
 export // Vertical 14 mm transverse stiffener, full local web height, in the skewed plane.
 function webStiffener(parent, mat, c, i, s, u, face) {
   const station = supportStation(c, s, u),
-    top = girderTop(c, i, station) + crossAt(c, u) - 0.05,
-    bottom = girderTop(c, i, station) + crossAt(c, u) - girderDepth(c, station, u) + 0.05,
+    top = girderTop(c, i, station, u) + crossAt(c, u) - 0.05,
+    bottom = girderTop(c, i, station, u) + crossAt(c, u) - girderDepth(c, station, u) + 0.05,
     inner = u + (face * c.web) / 2,
     outer = u + face * (c.web / 2 + 0.2);
   return skewPlate(

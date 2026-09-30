@@ -48,6 +48,7 @@ export const defaults = {
   bentWidth: 1.9,
   bentThickness: 1,
   bentEndThickness: 1,
+  bentTaperStart: 0,
   pierType: 'bent',
   columns: 2,
   columnShape: 'round',
@@ -70,6 +71,7 @@ export const defaults = {
   frontSlopeDrop: 0,
   frontSlopeMaterial: 'grass',
   approachConeMaterial: 'grass',
+  approachWalls: 'none',
   environment: 'rural',
   terrainMode: 'grass',
   terrainShape: 'natural',
@@ -291,6 +293,17 @@ export function crossAt(c, u) {
   if (c.crossfall === 'left') return ((c.crossSlope ?? 2) / 100) * d;
   return 0;
 }
+// A polygon needs vertices on the centre line to retain both slopes when its faces are triangulated.
+export function crossfallSection(c, points, splitEdges) {
+  if (c.crossfall !== 'crown') return points;
+  const centre = c.crownOffset ?? 0;
+  return points.flatMap((p, i) => {
+    const q = points[(i + 1) % points.length];
+    if (splitEdges ? !splitEdges.has(i) : (p[0] - centre) * (q[0] - centre) >= 0) return [p];
+    const t = q[0] === p[0] ? 0 : Math.max(0, Math.min(1, (centre - p[0]) / (q[0] - p[0])));
+    return [p, [p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]];
+  });
+}
 // Lowest deck offset across the width (conservative clearance).
 export const lowestCross = c => Math.min(crossAt(c, -c.width / 2), crossAt(c, c.width / 2), crossAt(c, 0));
 // Obstacles under a span: water, road, railway or open ground (terrain vague, no crossing).
@@ -328,7 +341,7 @@ export function validate(raw) {
   if (typeof c.steelColor === 'string' && /^#[0-9a-f]{6}$/i.test(c.steelColor))
     c.steelColor = c.steelColor.toUpperCase();
   if (!Object.hasOwn(raw, 'boxBottomWidth')) c.boxBottomWidth = c.boxTopWidth - c.depth / 2;
-  Object.assign(c, { asphalt: 0.065, web: 0.014, barrier: 1.1, haunch: 0.05 });
+  Object.assign(c, { asphalt: 0.065, web: 0.014, barrier: 1.1 });
   // Structural slab thickness under the asphalt: 200, 225 (default) or 250 mm.
   c.deck = Number(c.deck);
   if (![0.2, 0.225, 0.25].includes(c.deck)) throw Error('Slab thickness: select 200, 225 or 250 mm.');
@@ -346,9 +359,10 @@ export function validate(raw) {
   c.crossSlope = Number(c.crossSlope);
   if (![2, 3, 4].includes(c.crossSlope)) throw Error('Uniform crossfall: select 2, 3 or 4 %.');
   if (typeof c.crownOffset !== 'number' || !Number.isFinite(c.crownOffset) || Math.abs(c.crownOffset) > c.width / 2)
-    throw Error('Crown line: enter an offset within the deck width.');
+    throw Error('Center line: enter an offset within the deck width.');
   if (!['dashed', 'double'].includes(c.centreLine)) throw Error('Select a dashed or double yellow centre line.');
-  if (!['rough', 'formwork', 'weathered'].includes(c.concreteFinish)) throw Error('Select a concrete finish.');
+  c.concreteFinish = { formwork: 'light', weathered: 'warm' }[c.concreteFinish] ?? c.concreteFinish;
+  if (!['rough', 'light', 'warm'].includes(c.concreteFinish)) throw Error('Select a concrete finish.');
   if (typeof c.girderScreens !== 'boolean') throw Error('Invalid girder screen option.');
   if (!['stylised', 'physical'].includes(c.skyModel)) throw Error('Select a sky model.');
   const cycling = c.trafficMode === 'cyclists';
@@ -371,7 +385,7 @@ export function validate(raw) {
     web: [0.008, 0.08],
     deck: [0.15, 0.6],
     asphalt: [0.025, 0.2],
-    haunch: [0.05, 0.5],
+    haunch: [0.02, 0.12],
     barrier: [0.8, 1.5],
     wingAngle: [0, 90],
     laneCount: [0, 8],
@@ -393,11 +407,15 @@ export function validate(raw) {
     bentWidth: [0.5, 5],
     bentThickness: [0.35, 3],
     bentEndThickness: [0.35, 3],
+    bentTaperStart: [0, c.width / 2 - 0.15],
   });
   for (const [k, [lo, hi]] of Object.entries(limits))
     if (typeof c[k] !== 'number' || !Number.isFinite(c[k]) || c[k] < lo || c[k] > hi)
       throw Error(`${k}: enter a number from ${lo} to ${hi}.`);
+  if (c.bentTaperStart >= c.width / 2 - 0.15 && c.bentEndThickness !== c.bentThickness)
+    throw Error('Cap taper start must be inside the transverse cap tip.');
   if (typeof c.movingTraffic !== 'boolean') throw Error('Invalid moving traffic option.');
+  if (!['none', 'mse'].includes(c.approachWalls)) throw Error('Select approach retaining walls.');
   if (
     typeof c.frontSlope !== 'boolean' ||
     !['grass', 'stone', 'concrete'].includes(c.frontSlopeMaterial) ||
@@ -410,6 +428,8 @@ export function validate(raw) {
     !['none', '301', '210A', '210C', '20C'].includes(c.sidewalkRailing)
   )
     throw Error('Invalid railing selection.');
+  if (c.trafficMode === 'vehicles' && (c.leftRailing === 'SDC' || c.rightRailing === 'SDC'))
+    throw Error('Samuel-De Champlain railings are available for cyclist and pedestrian bridges only.');
   // Approach barriers: none, the bridge railings continued, or a W-beam guardrail (road bridges only).
   if (!['none', 'extend', 'guardrail'].includes(c.approachBarrier)) throw Error('Select an approach barrier.');
   // Night lighting: street lights (30 m by default) or LEDs in a 20C handrail (3 m), white or warm.
@@ -419,8 +439,8 @@ export function validate(raw) {
     !['both', 'left', 'right'].includes(c.lightSides)
   )
     throw Error('Select a lighting type and colour.');
-  if (c.lighting === 'handrail' && c.leftRailing !== '20C' && c.rightRailing !== '20C')
-    throw Error('Handrail lighting needs a 20C railing on at least one side.');
+  if (c.lighting === 'handrail' && ![c.leftRailing, c.rightRailing].some(type => ['20C', 'SDC'].includes(type)))
+    throw Error('Handrail lighting needs a 20C or Samuel-De Champlain railing on at least one side.');
   if (c.trafficMode === 'cyclists' && c.approachBarrier === 'guardrail') c.approachBarrier = 'extend';
   if (!Number.isInteger(c.girders) || !Number.isInteger(c.seed) || !Number.isInteger(c.laneCount))
     throw Error('Girder count, lane count and scenery seed must be whole numbers.');
@@ -478,6 +498,7 @@ export function validate(raw) {
       throw Error('Columns overlap: increase the outer column spacing or reduce the column size.');
   }
   if (!['blue', 'white'].includes(c.background)) throw Error('Select a blue or white background.');
+  c.background = 'blue';
   if (
     !['none', 'barrier', 'sidewalk'].includes(c.medianType) ||
     typeof c.medianWidth !== 'number' ||
@@ -631,15 +652,14 @@ export function supportStation(c, station, u) {
   }
   return s;
 }
-export function girderTop(c, i, s) {
+export function girderTop(c, i, s, u = 0) {
   if (isConcreteDeck(c)) return profile(c, s) - c.asphalt;
-  const ss = stations(c),
-    a = ss[i],
-    b = ss[i + 1];
-  // Precast girders are straight in elevation; variable haunch fills to the crest.
-  const y =
-    c.material === 'concrete' ? profile(c, a) + ((profile(c, b) - profile(c, a)) * (s - a)) / (b - a) : profile(c, s);
-  return y - c.asphalt - c.deck - c.haunch;
+  // The conceptual beams follow the longitudinal profile. Level NEBT / I-girder flanges need a small
+  // crossfall allowance so every point of the concrete haunch remains between 20 and 120 mm.
+  const halfFlange = c.material === 'concrete' ? 0.6 : c.material === 'steel' ? 0.25 : 0,
+    offsets = [-halfFlange, 0, halfFlange].map(v => crossAt(c, u + v) - crossAt(c, u)),
+    haunch = Math.max(0.02 - Math.min(...offsets), Math.min(0.12 - Math.max(...offsets), c.haunch));
+  return profile(c, s) - c.asphalt - c.deck - haunch;
 }
 export function clearance(c, i) {
   const ss = stations(c),

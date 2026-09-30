@@ -1,5 +1,19 @@
 # BridgeSketch 3D
 
+## 0.6.0 — revue du 2026-09-29, terminée le 2026-09-30 — local, non publié
+
+Source : uniquement la page Notion « BridgeSketch 3D 0.6.0 — Compte rendu 2026-09-28 puis commentaires 2026-09-29 ».
+
+- Couronne : sommets ajoutés à la ligne centrale sur les deux faces de dalle; épaisseur conservée, goussets de 20 à 120 mm et blocs d'assise variables (minimum 100 mm). Libellé « Center line ». Début d'effilement du chevêtre réglable.
+- SDC : 17 barrotins par intervalle de 3 m, grille continue entre travées et éclairage sous la main courante.
+- Site : option de murs TSM à panneaux pour les deux approches; herbe sur le terrain vague et les talus. Train routier de 4,15 m de haut, sélectionné moins souvent.
+- Rendu : couleurs de béton gris froid et gris chaud, cartes PBR conservées; chaussée mouillée moins réfléchissante. Les deux modèles de ciel restent disponibles.
+- Interface : logo visible avant reconstruction, dimensions d'obstacles ouvertes et focus de saisie conservé, Blue studio, bandeau aminci, Focus plein écran sur desktop/mobile.
+- Introduction : image pré-rendue animée par CSS en boucle de 2 s jusqu'à disponibilité de la scène. Temps deux fois plus lent, zoom plus proche, pan plus sensible.
+- Sept exemples couvrent plusieurs systèmes, 1 à 8 travées, pluie/neige/automne/été, tailles de terrain et heures variées. Modules JavaScript regroupés dans `dist/modules/`; lancement et contrôles hors ligne adaptés.
+
+Rapport et captures : `Codex outputs/Compte-rendu-BridgeSketch-0.6.0-2026-09-30.md`. Aucun commit ni push pour cette revue.
+
 ## 0.6.0 — 2026-09-28 — Anthony Chéruel
 
 Directives Notion « Bridge Sketch 3D fix and features for 0.6 »:

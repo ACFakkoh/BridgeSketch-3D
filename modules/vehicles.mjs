@@ -1,9 +1,14 @@
 import * as T from 'three';
-import { mergeGeometries } from './vendor/BufferGeometryUtils.js';
-import data from './models/vehicles-data.mjs';
+import { mergeGeometries } from '../vendor/BufferGeometryUtils.js';
+import data from '../models/vehicles-data.mjs';
 
 // Kenney Car Kit 3.1, CC0; offline meshes with dedicated automotive materials.
 export const vehicleKinds = Object.freeze(['sedan', 'suv', 'hatchback', 'pickup', 'van', 'truck', 'semi', 'double']);
+// Four of each ordinary vehicle for every road train.
+export function trafficKind(index) {
+  const slot = Math.abs(Math.trunc(index)) % 29;
+  return slot === 28 ? 'double' : vehicleKinds[slot % (vehicleKinds.length - 1)];
+}
 const surface = (color, roughness = 0.5, metalness = 0) => new T.MeshStandardMaterial({ color, roughness, metalness });
 const finishes = {
   paint: surface('#2e6484', 0.28, 0.32),
@@ -75,8 +80,8 @@ function modelParts(type) {
 }
 
 // Double (train routier, 0.6.0): long-nose tractor with sleeper and two 8.2 m pup trailers joined by a converter
-// dolly; 18.0 m from the steer axle to the last axle, 4.8 m from the asphalt to the top of the trailers.
-export const DOUBLE = { length: 21.6, height: 4.8, frontAxle: 1.3, lastAxle: 19.3 };
+// dolly; 18.0 m from the steer axle to the last axle, 4.15 m from the asphalt to the top of the trailers.
+export const DOUBLE = { length: 21.6, height: 4.15, frontAxle: 1.3, lastAxle: 19.3 };
 function createDoubleModel(group, paint, material) {
   const L = DOUBLE.length,
     x = d => L / 2 - d; // distance from the front bumper → local x (+X forward)
@@ -106,14 +111,14 @@ function createDoubleModel(group, paint, material) {
     box('Fender', paint, 0.6, 2.2, 0.75, 1.25, 0.35, z);
     box('Headlamp', material('headlamp'), 0.32, 0.4, 1.35, 1.55, 0.35, z * 0.8);
     box('Fuel tank', material('metal'), 3.4, 4.9, 0.55, 1.15, 0.55, z * 1.02);
-    add('Exhaust stack', new T.CylinderGeometry(0.08, 0.08, 2.6, 8), material('metal'), x(4.55), 3.0, z * 1.05);
+    add('Exhaust stack', new T.CylinderGeometry(0.08, 0.08, 2.45, 8), material('metal'), x(4.55), 2.925, z * 1.05);
     box('Mirror', material('trim'), 2.35, 2.45, 2.3, 2.75, 0.12, z * 1.35);
   }
   box('Cab', paint, 2.55, 4.3, 0.95, 3.15, 2.45);
   box('Windshield', material('glass'), 2.5, 2.62, 2.15, 3.0, 2.2);
   for (const z of [-1.23, 1.23]) box('Side window', material('glass'), 2.8, 3.6, 2.15, 2.85, 0.02, z);
   box('Sleeper', paint, 4.3, 6.0, 0.95, 3.55, 2.45);
-  box('Roof fairing', paint, 3.4, 6.0, 3.15, 4.25, 2.3);
+  box('Roof fairing', paint, 3.4, 6.0, 3.15, DOUBLE.height - 0.1, 2.3);
   box('Chassis', material('trim'), 0.4, 7.4, 0.55, 0.85, 1.0);
   box('Fifth wheel', material('trim'), 5.9, 7.1, 0.95, 1.12, 1.9);
   // Trailer 1 (5.2–13.4) on the fifth wheel, converter dolly with draw bar, trailer 2 (13.4–21.6).

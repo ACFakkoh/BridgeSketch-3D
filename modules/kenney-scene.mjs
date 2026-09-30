@@ -1,5 +1,5 @@
 import * as T from 'three';
-import data from './models/kenney-scene-data.mjs';
+import data from '../models/kenney-scene-data.mjs';
 
 const templates = new Map();
 export const trainStyles = Object.freeze(['mixed', 'diesel', 'bullet', 'city']);

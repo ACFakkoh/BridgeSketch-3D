@@ -1,6 +1,19 @@
 # BridgeSketch 3D — suivi des travaux
 
-Mise à jour : 2026-09-28. Source de vérité pour les changements locaux et leur état de publication.
+Mise à jour : 2026-09-30. Source de vérité pour les changements locaux et leur état de publication.
+
+## 0.6.0 — commentaires du 2026-09-29 et ajouts en bas du compte rendu (local, non publié)
+
+- [x] Couronne réelle à deux pentes, dalle d'épaisseur constante, libellé « Center line », blocs d'assise variables (minimum 100 mm), goussets de 20 à 120 mm.
+- [x] Distance de début d'effilement du chevêtre réglable.
+- [x] SDC : 17 barrotins par travée de poteaux de 3 m et éclairage sous la main courante.
+- [x] Herbe sur terrain vague et talus; camion de 4,15 m, moins fréquent; deux nouvelles couleurs de béton; chaussée mouillée moins brillante; deux ciels conservés.
+- [x] Murs d'approche TSM à panneaux, fermés aux extrémités; logo de chargement; édition persistante des dimensions d'obstacles.
+- [x] Blue studio seul, bandeau compact, Focus plein écran desktop/mobile, introduction pré-rendue en boucle de 2 s.
+- [x] Temps deux fois plus lent, zoom rapproché et pan plus sensible, sept exemples variés, modules regroupés dans `dist/modules/`.
+- [ ] Push GitHub à décider ensuite avec Anthony.
+
+Compte rendu détaillé : `Codex outputs/Compte-rendu-BridgeSketch-0.6.0-2026-09-30.md`.
 
 ## 0.6.0 — demandes Notion « Bridge Sketch 3D fix and features for 0.6 » (local, non publié)
 

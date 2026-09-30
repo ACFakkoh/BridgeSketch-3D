@@ -1,5 +1,5 @@
 import * as T from 'three';
-import { OrbitControls } from './vendor/OrbitControls.js';
+import { OrbitControls } from '../vendor/OrbitControls.js';
 import {
   defaults,
   validate,
@@ -22,6 +22,7 @@ import {
   psboxLayout,
   crossAt,
   lowestCross,
+  crossfallSection,
 } from './geometry.mjs';
 import { psboxParts } from './systems.mjs';
 import { release } from './release.mjs';
@@ -56,7 +57,7 @@ import { makeWeather } from './weather.mjs';
 import { makeAmbient } from './ambient.mjs';
 import { setVehicleLights } from './vehicles.mjs';
 import { grassUniforms } from './grass.mjs';
-import { cloudShadow } from './materials.mjs';
+import { cloudShadow, concreteFinishes } from './materials.mjs';
 import { renderSettings, effectiveQuality, setGpuName, stepDownAuto, gpuInfo } from './quality.mjs';
 
 // Golden hour: the sun about 7° above the horizon, 30 min before sunset.
@@ -171,6 +172,7 @@ function initWorkspace() {
   $('activeSpan').onchange = selectSpan;
 }
 function refreshForm() {
+  const crossingOpen = [...$('spanRows').children].map(row => row.querySelector('details').open);
   $('archSpan').innerHTML =
     `<option value="-1">Longest span (${archSpanIndex({ ...config, archSpan: -1 }) + 1})</option>` +
     config.spans.map((span, i) => `<option value="${i}">Span ${i + 1} · ${span.length} m</option>`).join('');
@@ -196,7 +198,7 @@ function refreshForm() {
   $('spanRows').innerHTML = config.spans
     .map(
       (span, i) =>
-        `<section class="span-row" ${i === activeSpan ? '' : 'hidden'}><h3>SPAN ${i + 1}</h3><label>Crossing<select data-span="${i}" data-key="obstacle">${['water', 'road', 'rail', 'land'].map(v => `<option value="${v}" ${span.obstacle === v ? 'selected' : ''}>${{ water: 'Water', road: 'Road', rail: 'Railway', land: 'Open ground · no crossing' }[v]}</option>`).join('')}</select></label><label>Vertical clearance · m<input data-span="${i}" data-key="clearance" type="number" min=".3" max="35" step=".01" value="${clearance(config, i).toFixed(2)}"></label><details><summary>Crossing dimensions</summary><div class="field-grid">${[
+        `<section class="span-row" ${i === activeSpan ? '' : 'hidden'}><h3>SPAN ${i + 1}</h3><label>Crossing<select data-span="${i}" data-key="obstacle">${['water', 'road', 'rail', 'land'].map(v => `<option value="${v}" ${span.obstacle === v ? 'selected' : ''}>${{ water: 'Water', road: 'Road', rail: 'Railway', land: 'Open ground · no crossing' }[v]}</option>`).join('')}</select></label><label>Vertical clearance · m<input data-span="${i}" data-key="clearance" type="number" min=".3" max="35" step=".01" value="${clearance(config, i).toFixed(2)}"></label><details ${crossingOpen[i] ? 'open' : ''}><summary>Crossing dimensions</summary><div class="field-grid">${[
           ['width', 'Width · m', 3, 60],
           ['elevation', 'Elevation · m', -5, 15],
           ['angle', 'Crossing angle · °', 35, 145],
@@ -285,7 +287,7 @@ function syncEnabled() {
   form.elements.frontSlopeDrop.disabled = !config.frontSlope;
   form.elements.lightSpacing.disabled = form.elements.lightColor.disabled = form.elements.lightSides.disabled =
     config.lighting === 'none';
-  form.elements.lighting.options[2].disabled = config.leftRailing !== '20C' && config.rightRailing !== '20C';
+  form.elements.lighting.options[2].disabled = ![config.leftRailing, config.rightRailing].some(type => ['20C', 'SDC'].includes(type));
   form.elements.sidewalkWidth.disabled = config.sidewalkSide === 'none';
   form.elements.sidewalkRailing.disabled = config.sidewalkSide === 'none';
   $('median-width-label').hidden = config.medianType !== 'sidewalk';
@@ -302,6 +304,9 @@ function syncEnabled() {
   $('fascia-swatch').style.background = fascia;
   form.elements.columns.disabled = config.pierType !== 'bent';
   $('bent-settings').hidden = config.pierType !== 'bent';
+  form.elements.bentTaperStart.max = String(Math.max(0, config.width / 2 - 0.16));
+  for (const name of ['frontSlope', 'frontSlopeDrop', 'frontSlopeMaterial', 'approachConeMaterial'])
+    form.elements[name].disabled = config.approachWalls === 'mse';
   form.elements.movingTraffic.disabled = !config.showTraffic;
   form.elements.width.min = config.trafficMode === 'cyclists' ? '3' : '4';
   form.elements.laneWidth.min = config.trafficMode === 'cyclists' ? '1.5' : '2.5';
@@ -424,21 +429,22 @@ function applyTimeOfDay(hour) {
     config.skyMode === 'clouds' || wet ? (wet ? 0.18 : 0.42) * daylight * (1 - 0.6 * golden) : 0;
   weather?.set(config.weather, daylight);
   // Ambient touches (0.6.0): birds by day, vehicle lamps after dusk, wet (glossier) road and concrete in rain.
-  ambient?.set(config.background === 'white' ? 0 : daylight, golden, config.weather, scene.userData.birdCentre);
+  ambient?.set(daylight, golden, config.weather, scene.userData.birdCentre);
   setVehicleLights(1 - T.MathUtils.smoothstep(daylight, 0.08, 0.45));
   if (materials) {
     const rain = config.weather === 'rain';
-    materials.asphalt.roughness = rain ? 0.38 : 0.9;
-    materials.asphalt.envMapIntensity = rain ? 1.6 : 1;
+    materials.asphalt.roughness = rain ? 0.72 : 0.9;
+    materials.asphalt.metalness = 0;
+    materials.asphalt.envMapIntensity = rain ? 0.8 : 1;
     materials.concrete.roughness = materials.edge.roughness = rain ? 0.62 : 0.88;
   }
   // Stylised atmospheric haze: cool by day, peach at golden hour, deep blue at night (option).
   const radius = scene.userData.radius ?? 120,
-    hazeColor = config.background === 'white' ? new T.Color('#ffffff') : tint('#141f33', '#b4c7d4', '#e2ae8a');
+    hazeColor = tint('#141f33', '#b4c7d4', '#e2ae8a');
   scene.fog.color.copy(hazeColor);
   scene.fog.near = config.fog || wet ? radius * (wet ? 0.35 : 1.4 - 0.3 * golden) : 1e5;
   scene.fog.far = config.fog || wet ? radius * (wet ? 3.2 : 9 - 2.5 * golden - 2.5 * (1 - daylight)) : 2e5;
-  if (wet && config.background !== 'white') scene.fog.color.lerp(new T.Color(config.weather === 'snow' ? '#c9d2da' : '#7f8a94').multiplyScalar(0.25 + 0.75 * daylight), 0.7);
+  if (wet) scene.fog.color.lerp(new T.Color(config.weather === 'snow' ? '#c9d2da' : '#7f8a94').multiplyScalar(0.25 + 0.75 * daylight), 0.7);
   if (sky) {
     sky.uniforms.fogColor.value.copy(scene.fog.color).convertLinearToSRGB();
     sky.uniforms.fogAmount.value = wet ? 0.8 : config.fog ? 0.4 + 0.25 * golden : 0;
@@ -526,7 +532,7 @@ function renderSection() {
     ),
   );
   const bottom = c.material === 'slab' ? -deepest - 0.065 : top - deepest;
-  // Deck crossfall: deck parts are drawn sheared (verticals stay vertical), girders are lifted rigidly.
+  // Deck and slab follow crossfall; NEBT/I flanges stay level, boxes follow the slab.
   const xf = u => crossAt(c, u);
   const svg = $('sectionSvg'),
     svgWidth = Math.max(580, Math.min(1000, svg.clientWidth || 800));
@@ -538,7 +544,7 @@ function renderSection() {
     k = Math.min((svgWidth - 60) / (c.width + 2.4), 360 / (hi - lo)),
     cy = 290 + (k * (hi + lo)) / 2;
   const poly = (points, fill, stroke = '#344a50', sheared = true) =>
-    `<polygon points="${points.map(([u, y]) => [u, sheared ? y + xf(u) : y].join(',')).join(' ')}" fill="${fill}" stroke="${stroke}" stroke-width=".018"/>`;
+    `<polygon points="${(sheared ? crossfallSection(c, points) : points).map(([u, y]) => [u, sheared ? y + xf(u) : y].join(',')).join(' ')}" fill="${fill}" stroke="${stroke}" stroke-width=".018"/>`;
   const rectangle = (a, b, t, d, fill, sheared = true) =>
     poly(
       [
@@ -552,7 +558,7 @@ function renderSection() {
       sheared,
     );
   // Concrete outlines carry the same 15 × 15 mm chamfers as the 3D model.
-  const concrete = (points, fill) => poly(chamferSection(points), fill);
+  const concrete = (points, fill) => poly(chamferSection(points), concreteFinishes[c.concreteFinish] ?? fill);
   let drawing = `<line x1="${-half - 1}" x2="${half + 1}" y1="0" y2="0" stroke="#849596" stroke-width=".018" stroke-dasharray=".12 .1"/>`;
   if (c.material === 'slab') {
     const us = Array.from({ length: 25 }, (_, j) => -half + (c.width * j) / 24);
@@ -581,10 +587,11 @@ function renderSection() {
             : c.material === 'box'
               ? Object.values(boxSection(girderDepthAt, c.boxTopWidth, c.boxBottomWidth, 0.05, c.web))
               : [steelSection(c.depth, c.web).map(([x, y]) => [x, y < -0.05 ? y + c.depth - girderDepthAt : y])];
-      const xg = xf(u);
+      const xg = xf(u),
+        beamTop = girderTop(c, i, s, u) - profile(c, s);
       for (const section of sections)
         drawing += poly(
-          section.map(([x, y]) => [x + u, y + top + xg]),
+          section.map(([x, y]) => [x + u, y + beamTop + (c.material === 'box' ? xf(x + u) : xg)]),
           c.material === 'concrete'
             ? '#aba79a'
             : (() => {
@@ -600,8 +607,8 @@ function renderSection() {
             drawing += rectangle(
               u + face * 0.007,
               u + face * 0.207,
-              top - 0.05 + xg,
-              top - girderDepthAt + 0.05 + xg,
+              beamTop - 0.05 + xg,
+              beamTop - girderDepthAt + 0.05 + xg,
               'none',
               false,
             ).replace('stroke="#344a50"', 'stroke="#344a50" stroke-dasharray=".05 .04"');
@@ -620,8 +627,8 @@ function renderSection() {
           [
             [a, -0.065 - c.deck + xf(a)],
             [b, -0.065 - c.deck + xf(b)],
-            [b, top + xg],
-            [a, top + xg],
+            [b, beamTop + (c.material === 'box' ? xf(b) : xg)],
+            [a, beamTop + (c.material === 'box' ? xf(a) : xg)],
           ],
           '#c0bdb1',
           undefined,
@@ -784,16 +791,38 @@ function renderSection() {
         yb = Y(0.42 + xf(ub));
       dims += `<line x1="${X(ua)}" x2="${X(ub)}" y1="${ya}" y2="${yb}" stroke="#17374b" stroke-width="1.2"/><path d="M${X(ub)} ${yb} l${-dir * 8} -4 l0 8 z" fill="#17374b"/><text x="${X(u)}" y="${Math.min(ya, yb) - 7}" text-anchor="middle" font-size="11.5" fill="#17374b">${pct.toFixed(1)} %</text>`;
     }
-    dims += `<line x1="${X(c.crownOffset)}" x2="${X(c.crownOffset)}" y1="${Y(1.4)}" y2="${Y(bottom - 0.3)}" stroke="#b0412e" stroke-width=".9" stroke-dasharray="10 3 2 3"/><text x="${X(c.crownOffset) + 4}" y="${Y(1.4) + 10}" font-size="10.5" fill="#b0412e">${c.crossfall === 'crown' ? 'Crown line' : 'Profile grade line'}</text>`;
+    dims += `<line x1="${X(c.crownOffset)}" x2="${X(c.crownOffset)}" y1="${Y(1.4)}" y2="${Y(bottom - 0.3)}" stroke="#b0412e" stroke-width=".9" stroke-dasharray="10 3 2 3"/><text x="${X(c.crownOffset) + 4}" y="${Y(1.4) + 10}" font-size="10.5" fill="#b0412e">Center line</text>`;
   }
   // Title block: variant, software version, date and author.
-  const today = new Date().toISOString().slice(0, 10),
+  const sectionDate = new Date(),
+    today = `${sectionDate.getFullYear()}-${String(sectionDate.getMonth() + 1).padStart(2, '0')}-${String(sectionDate.getDate()).padStart(2, '0')}`,
     bx = svgWidth - 300,
     escape = t => t.replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
   const titleBlock = `<g font-size="12" fill="#17374b"><rect x="${bx}" y="492" width="280" height="92" fill="#fff" stroke="#17374b" stroke-width="1.2"/><line x1="${bx}" x2="${bx + 280}" y1="518" y2="518" stroke="#17374b"/><line x1="${bx}" x2="${bx + 280}" y1="540" y2="540" stroke="#8aa1a7"/><line x1="${bx}" x2="${bx + 280}" y1="562" y2="562" stroke="#8aa1a7"/><text x="${bx + 10}" y="510" font-size="13" font-weight="600">${escape(c.name || 'Unnamed variant')}</text><text x="${bx + 10}" y="533">Transverse section · station ${s.toFixed(2)} m</text><text x="${bx + 10}" y="555">${escape(release.name)} v${release.version} · ${today}</text><text x="${bx + 10}" y="577">${escape(release.author)} · dimensions in metres</text></g>`;
   svg.innerHTML = `<title>Transverse deck section at station ${s.toFixed(2)} metres</title><g transform="translate(${svgWidth / 2} ${cy}) scale(${k} ${-k})">${drawing}</g><text x="30" y="54" fill="#17374b" font-size="22" font-weight="600">TRANSVERSE DECK SECTION</text><text x="30" y="83" fill="#557279" font-size="15">Station ${s.toFixed(2)} m · Deck ${c.width.toFixed(2)} m · ${c.material === 'box' ? 'Steel box' : c.material === 'steel' ? 'Steel plate' : c.material === 'slab' ? 'Concrete slab' : c.material === 'psbox' ? 'Prestressed concrete box' : 'Concrete NEBT'} · Depth ${actualDepth.toFixed(2)} m</text><text x="30" y="575" fill="#557279" font-size="14">Looking toward bridge end · Left / right follow alignment</text>${dims}${titleBlock}`;
 }
-function update(raw, { resetCamera = false, refresh = false } = {}) {
+let updateQueue = Promise.resolve();
+function update(raw, options = {}) {
+  const next = validate(raw);
+  updateQueue = updateQueue.catch(() => {}).then(async () => {
+    const loading = $('scene-loading');
+    loading.hidden = false;
+    $('viewport').setAttribute('aria-busy', 'true');
+    // Give the compositor a painted logo before synchronous geometry work starts.
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    try {
+      rebuild(next, options);
+      await renderer.compileAsync(scene, camera);
+      renderReflection();
+      renderer.render(scene, camera);
+    } finally {
+      loading.hidden = true;
+      $('viewport').setAttribute('aria-busy', 'false');
+    }
+  });
+  return updateQueue;
+}
+function rebuild(raw, { resetCamera = false, refresh = false } = {}) {
   stopDriving();
   const next = validate(raw),
     started = performance.now(),
@@ -808,7 +837,7 @@ function update(raw, { resetCamera = false, refresh = false } = {}) {
   applyReveal();
   model.setting.visible = view !== 'elevation';
   // The sky dome is the backdrop and the reflected sky; clouds are optional.
-  sky.mesh.visible = config.background !== 'white';
+  sky.mesh.visible = true;
   sky.setClouds(config.skyMode === 'clouds' || config.weather === 'rain' || config.weather === 'snow');
   sky.setModel(config.skyModel);
   if (sky.seed !== config.seed) {
@@ -833,7 +862,6 @@ function update(raw, { resetCamera = false, refresh = false } = {}) {
     sun.shadow.map?.dispose();
     sun.shadow.map = null;
   }
-  document.body.classList.toggle('background-white', config.background === 'white');
   applyTimeOfDay(config.timeOfDay);
   if (refresh) refreshForm();
   else {
@@ -916,7 +944,7 @@ function syncTimePlay() {
   const on = config.timeFlow;
   $('timePlay').textContent = on ? '❚❚' : '▶';
   $('timePlay').setAttribute('aria-pressed', on);
-  $('timePlay').title = on ? 'Stop the time (15 min every 5 s)' : 'Let the time run (15 min every 5 s)';
+  $('timePlay').title = on ? 'Stop the time (15 min every 10 s)' : 'Let the time run (15 min every 10 s)';
   needsRender = true;
 }
 function updateHeading() {
@@ -1175,7 +1203,10 @@ async function boot() {
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
-  controls.minDistance = 8;
+  controls.minDistance = 1;
+  controls.minZoom = 0.05;
+  controls.maxZoom = 50;
+  controls.panSpeed = 1.8;
   controls.maxDistance = 2500;
   controls.maxPolarAngle = Math.PI * 0.5;
   materials = makeMaterials(() => (needsRender = true));
@@ -1191,7 +1222,7 @@ async function boot() {
   const intro = window.bridgeIntro;
   intro?.progress(0.35, 'Growing the landscape\u2026');
   await new Promise(requestAnimationFrame);
-  update(config, { refresh: true, resetCamera: true });
+  await update(config, { refresh: true, resetCamera: true });
   intro?.progress(0.62, 'Lighting the scene\u2026');
   await new Promise(requestAnimationFrame);
   // Capture the sky lighting and compile every shader before the first frame (in parallel where the driver
@@ -1288,11 +1319,11 @@ async function boot() {
     // Wind only moves the meadow while the scene is already animating, so a still view costs no frames.
     const animated = flowing || moving || controls.autoRotate || cloudy || weather.active || config.timeFlow;
     if (animated) grassUniforms.grassTime.value += dt;
-    // Flowing time: 15 minutes every 5 s by day (3 min per second), three times faster at night; the lighting
+    // Flowing time: 15 minutes every 10 s by day, three times faster at night; the lighting
     // is re-applied twice a second and the sky lighting re-captured every 1.5 s, so the cost stays small.
     if (config.timeFlow && !driving && view !== 'section') {
       const night = (scene.userData.daylight ?? 1) < 0.05;
-      config.timeOfDay = (config.timeOfDay + clockDt * (night ? 0.15 : 0.05)) % 24;
+      config.timeOfDay = (config.timeOfDay + clockDt * (night ? 0.075 : 0.025)) % 24;
       if (time - timeAppliedAt > 500) {
         applyTimeOfDay(config.timeOfDay);
         timeAppliedAt = time;
@@ -1428,7 +1459,7 @@ form.addEventListener('submit', e => e.preventDefault());
 document.querySelector('.view-options').addEventListener('change', e => {
   if (['showTraffic', 'movingTraffic'].includes(e.target.name)) form.dispatchEvent(new Event('change'));
 });
-form.addEventListener('change', e => {
+form.addEventListener('change', async e => {
   if (e.target.id === 'activeSpan') return;
   try {
     if (e.target.id === 'spanCount') {
@@ -1436,7 +1467,7 @@ form.addEventListener('change', e => {
       if (!Number.isInteger(count) || count < 1 || count > 8) throw Error('Use 1 to 8 spans.');
       const raw = readForm();
       raw.spans = Array.from({ length: count }, (_, i) => raw.spans[i] ?? { ...raw.spans.at(-1) });
-      update(raw, { refresh: true, resetCamera: true });
+      await update(raw, { refresh: true, resetCamera: true });
     } else {
       const raw = readForm();
       if (raw.curved && raw.material === 'concrete') raw.material = 'steel';
@@ -1448,7 +1479,7 @@ form.addEventListener('change', e => {
           raw.sidewalkSide = 'none';
           raw.sidewalkRailing = 'none';
           raw.approachBarrier = 'extend';
-          if (raw.leftRailing === '20C' || raw.rightRailing === '20C') raw.lighting = raw.lighting === 'none' ? 'none' : 'handrail';
+          if ([raw.leftRailing, raw.rightRailing].some(type => ['20C', 'SDC'].includes(type))) raw.lighting = raw.lighting === 'none' ? 'none' : 'handrail';
         } else {
           raw.approachBarrier = 'guardrail';
           raw.width = Math.max(raw.width, 8);
@@ -1531,7 +1562,8 @@ form.addEventListener('change', e => {
         raw.depth = depths.reduce((a, b) => (Math.abs(b - config.depth) < Math.abs(a - config.depth) ? b : a));
         $('nebt').value = raw.depth;
       }
-      update(raw, { refresh: true });
+      // Keep the edited crossing input and its focus alive for repeated arrow clicks.
+      await update(raw, { refresh: e.target.dataset.span === undefined || e.target.dataset.key === 'obstacle' });
     }
     $('feedback').hidden = true;
   } catch (error) {
@@ -1557,10 +1589,10 @@ $('reveal').onchange = () => {
   needsRender = true;
 };
 $('reset').onclick = () => selectPreset(presets[0].id);
-function selectPreset(id) {
+async function selectPreset(id) {
   const preset = presets.find(p => p.id === id);
   if (!preset) return;
-  update(makePreset(id), { refresh: true });
+  await update(makePreset(id), { refresh: true });
   fit('perspective');
   $('preset').value = id;
   if (!config.name) $('sceneTitle').textContent = preset.label;
@@ -1616,7 +1648,7 @@ $('file').onchange = async () => {
         config: validate({ ...(data.config ?? data), name: data.config?.name ?? data.name ?? '' }),
         camera: data.camera,
       };
-    update(saved.config, { refresh: true, resetCamera: true });
+    await update(saved.config, { refresh: true, resetCamera: true });
     restoreCamera(saved.camera);
     notify('Configuration loaded.');
   } catch (e) {
@@ -1744,7 +1776,7 @@ $('export-glb').onclick = async () => {
   button.textContent = 'Exporting…';
   let waterMaterial;
   try {
-    const { GLTFExporter } = await import('./vendor/GLTFExporter.js');
+    const { GLTFExporter } = await import('../vendor/GLTFExporter.js');
     const copy = model.root.clone(true);
     copy.children[0].visible = true;
     copy.children[1].children.find(o => o.name === 'Concrete deck haunches').visible = true;
@@ -1786,7 +1818,7 @@ function registerTools() {
       type: 'object',
       properties: {
         length: { type: 'number' },
-        obstacle: { type: 'string', enum: ['water', 'road', 'rail'] },
+        obstacle: { type: 'string', enum: ['water', 'road', 'rail', 'land'] },
         width: { type: 'number' },
         elevation: { type: 'number' },
         angle: { type: 'number' },
@@ -1820,7 +1852,7 @@ function registerTools() {
           )
         )
           next = fitBoxLayout(next);
-        update(next, { refresh: true });
+        await update(next, { refresh: true });
         renderer.render(scene, camera);
         return { config: structuredClone(config), stats: window.bridgeViewer.getStats() };
       },
@@ -1833,10 +1865,10 @@ function registerTools() {
     }
   }
 }
-window.addEventListener('hashchange', () => {
+window.addEventListener('hashchange', async () => {
   try {
     const saved = decodeConfig(location.hash);
-    update(saved.config, { refresh: true, resetCamera: true });
+    await update(saved.config, { refresh: true, resetCamera: true });
     restoreCamera(saved.camera);
   } catch (e) {
     notify(e.message, true);

@@ -1,12 +1,13 @@
 // BridgeSketch 3D · Night lighting: 12 m LED street lights on the bridge and approaches, or LED strips in the
-// handrail of 20C pedestrian railings. Lights switch on automatically from 20:00 to 06:30.
+// handrail of 20C or SDC pedestrian railings. Lights switch on automatically from 20:00 to 06:30.
 // Cost control: light pools and glows are additive decals (visible in the water reflection); only a
 // handful of real point lights are added, so the shader cost stays bounded whatever the lamp count.
 import * as T from 'three';
-import { crossAt, frame, profile, supportStation, totalLength } from './geometry.mjs';
+import { crossAt, frame, profile, roadLayout, supportStation, totalLength } from './geometry.mjs';
 import { box } from './sections.mjs';
-import { mergeGeometries } from './vendor/BufferGeometryUtils.js';
-import { barrierHeight, isConcrete, CURB_HEIGHT } from './deck-profiles.mjs';
+import { mergeGeometries } from '../vendor/BufferGeometryUtils.js';
+import { barrierHeight, isConcrete, CURB_HEIGHT, sidewalkTop } from './deck-profiles.mjs';
+import { SDC } from './railings.mjs';
 
 // 12 m street light, after the supplied standard drawing: tapered galvanised pole with a transformer base and
 // handhole, one upswept davit arm reaching 3.0 m (horizontal projection) towards the road, a curved lower brace
@@ -156,21 +157,30 @@ export function buildLighting(c, m, ranges) {
       group.add(mesh);
     }
   } else {
-    // Handrail LEDs: one diode every lightSpacing under the top rail of each 20C railing, lighting the deck edge.
+    // Handrail LEDs: short bars underneath each 20C top rail or SDC inner handrail, lighting the deck edge.
     // On the approaches only where the railings continue there.
-    const [from, to] = c.approachBarrier === 'extend' ? [start, end] : [0, L];
+    const [from, to] = c.approachBarrier === 'extend' ? [start, end] : [0, L],
+      layout = roadLayout(c);
     for (const side of [-1, 1].filter(
       side =>
-        (side < 0 ? c.leftRailing : c.rightRailing) === '20C' &&
+        ['20C', 'SDC'].includes(side < 0 ? c.leftRailing : c.rightRailing) &&
         (c.lightSides === 'both' || (side < 0) === (c.lightSides === 'left')),
     ))
       for (let s = from + spacing / 2; s < to; s += spacing) {
-        const head = onDeck(s, side * (half - 0.18), 0.215 + 1.33);
-        // A short LED bar under the top rail at each spacing; bars merge into a line at close spacing.
+        const type = side < 0 ? c.leftRailing : c.rightRailing,
+          walk = side < 0 ? layout.left : layout.right,
+          face = (side < 0 ? layout.roadMin : layout.roadMax) + (c.sidewalkRailing === '301' ? side * layout.innerBarrier : 0),
+          base = walk ? sidewalkTop(c.asphalt, face, side * half) : CURB_HEIGHT - c.asphalt,
+          u0 = side * (half - 0.2),
+          u = type === 'SDC' ? u0 + side * (SDC.handrail * SDC.lean - 0.09) : side * (half - (walk ? 0.12 : 0.18)),
+          height = type === 'SDC' ? SDC.handrail - 0.04 + crossAt(c, u0) - crossAt(c, u) : 1.345,
+          head = onDeck(s, u, base + height);
+        // Bars merge into a line at close spacing.
         const led = box(group, lens, head.x, head.y, head.z, Math.min(spacing * 0.9, 1.5), 0.02, 0.05, head.yaw);
         led.name = 'Handrail LED';
         heads.push(head);
-        pools.push({ ...onDeck(s, side * (half - 0.9), 0.24), r: 1.8 });
+        const poolU = side * (half - 0.9);
+        pools.push({ ...onDeck(s, poolU, (walk ? sidewalkTop(c.asphalt, face, poolU) : 0) + 0.03), r: 1.8 });
       }
   }
   const disc = new T.PlaneGeometry(2, 2).rotateX(-Math.PI / 2),

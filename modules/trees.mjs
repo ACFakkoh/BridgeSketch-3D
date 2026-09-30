@@ -3,8 +3,8 @@
 // and one per leaf texture. Leaves keep EZ-Tree's rounded crown normals and get wind sway and
 // sun back-lighting in the shader; bark and leaf textures are bundled locally.
 import * as T from 'three';
-import { Tree } from './vendor/ez-tree/tree.js';
-import { TreePreset } from './vendor/ez-tree/presets.js';
+import { Tree } from '../vendor/ez-tree/tree.js';
+import { TreePreset } from '../vendor/ez-tree/presets.js';
 import { grassUniforms } from './grass.mjs';
 
 // Mesh detail per render quality (EZ-Tree LOD options): about 5k, 3k and 1.5k triangles per tree.

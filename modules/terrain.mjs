@@ -5,6 +5,7 @@ import { alignmentStation, crossAt, frame, girderDepth, profile, totalLength, st
 import { beam, box, seeded, soffitAt } from './sections.mjs';
 import { roadsideGuardrail } from './railings.mjs';
 import { positionVehicle, vehicle } from './traffic.mjs';
+import { trafficKind } from './vehicles.mjs';
 import { tuftGeometry, flowerGeometry, scatterMeadow, grassBudget, grassKinds } from './grass.mjs';
 import { addTrees } from './trees.mjs';
 import { effectiveQuality, renderSettings } from './quality.mjs';
@@ -197,6 +198,8 @@ export function terrainSampler(c) {
       u = (x - f.x) * f.nx + (z - f.z) * f.nz,
       start = supportStation(c, 0, u) + 0.9,
       end = supportStation(c, L, u) - 0.9;
+    // MSE walls retain the approach fill; surrounding ground stays at the valley floor beside them.
+    if (c.approachWalls === 'mse' && (s <= start - 0.9 || s >= end + 0.9)) return floor;
     let y = profile(c, s) - 0.25;
     if (s > start - 0.9 && s < end + 0.9) {
       // Valley walls: straight and tidy beside the bridge, gently undulating away from it.
@@ -239,7 +242,7 @@ export function terrainSampler(c) {
 // line) down to the ground. If the crossing leaves too little room, the toe
 // stops short of it and the slope starts lower on the wall, keeping 2H:1V.
 export function frontSlopeFit(c, end) {
-  if (!c.frontSlope) return { reach: 0, top: 0 };
+  if (!c.frontSlope || c.approachWalls === 'mse') return { reach: 0, top: 0 };
   const first = end === 0,
     span = first ? c.spans[0] : c.spans.at(-1),
     toward = first ? 1 : -1,
@@ -306,6 +309,12 @@ export function approachSurfaces(c, extent = 0) {
     const corners = [],
       frontReach = frontSlopeFit(c, end).reach;
     for (const side of [-1, 1]) {
+      if (c.approachWalls === 'mse') {
+        const corner = { end, side, station: end, ...apex(end, half * side), ring: [] };
+        corners.push(corner);
+        surfaces.corners.push(corner);
+        continue;
+      }
       const cone = setback => {
         const station = end - toward * setback,
           { p, f } = apex(station, half * side),
@@ -351,9 +360,12 @@ export function approachSurfaces(c, extent = 0) {
     const local = [];
     for (let s = a; s < b; s += 1) {
       const t = Math.min(b, s + 1);
-      local.push([apex(s, -half).p, apex(s, half).p, apex(t, half).p, apex(t, -half).p]);
+      const us = [-half, half];
+      if (c.crossfall === 'crown' && c.crownOffset > -half && c.crownOffset < half) us.splice(1, 0, c.crownOffset);
+      for (let j = 0; j < us.length - 1; j++)
+        local.push([apex(s, us[j]).p, apex(s, us[j + 1]).p, apex(t, us[j + 1]).p, apex(t, us[j]).p]);
     }
-    for (const corner of corners) {
+    for (const corner of c.approachWalls === 'mse' ? [] : corners) {
       const side = corner.side,
         a = Math.min(outer, corner.station),
         b = Math.max(outer, corner.station);
@@ -891,7 +903,7 @@ export function addEnvironment(c, m, parent, fills) {
         for (const t of [-halfLength * 0.6, halfLength * 0.6]) {
           const dir = divided ? forward : t < 0,
             lane = divided ? (t < 0 ? 1 : -1) * (dir ? 1 : -1) : dir ? 1 : -1,
-            kind = t < 0 ? 'car' : (Math.abs(Math.round(o.x * 7 + c.seed)) % 2 === 0 ? 'double' : 'truck');
+            kind = t < 0 ? 'car' : trafficKind(Math.round(o.x * 7 + c.seed));
           vehicle(parent, m, c, t, (lane * o.width) / 4, kind, dir, o);
         }
     } else {
@@ -1024,8 +1036,24 @@ export function addEnvironment(c, m, parent, fills) {
         const p = coordinates(o, x, z);
         return Math.abs(p.across - riverWiggle(p.along, c)) < o.width / 2 + 2.3;
       });
-    // Grass continues under the deck; only the supports, approach fills and crossings stay clear.
-    const groundZones = roadFootprints(c, fills, false),
+    // Grass continues on open ground and grass slopes; roads, stone/concrete faces and supports stay clear.
+    const groundZones = roadFootprints(c, Object.assign(fills.filter(face => face.finish !== 'grass'), { ranges: fills.ranges }), false),
+      grassFaces = fills.filter(face => face.finish === 'grass'),
+      // ponytail: scan the approach triangles; add a spatial index if larger landscapes make this costly.
+      grassHeight = (x, z) => {
+        for (const face of grassFaces)
+          for (let i = 1; i < face.length - 1; i++) {
+            const [a, b, d] = [face[0], face[i], face[i + 1]],
+              bx = b[0] - a[0], bz = b[2] - a[2], dx = d[0] - a[0], dz = d[2] - a[2],
+              area = bx * dz - bz * dx;
+            if (Math.abs(area) < 1e-8) continue;
+            const u = ((x - a[0]) * dz - (z - a[2]) * dx) / area,
+              v = (bx * (z - a[2]) - bz * (x - a[0])) / area;
+            if (u >= -1e-6 && v >= -1e-6 && u + v <= 1 + 1e-6)
+              return a[1] + u * (b[1] - a[1]) + v * (d[1] - a[1]) + 0.025;
+          }
+        return terrainHeight(x, z);
+      },
       supportLines = stations(c).slice(1, -1).flatMap(s => {
         const points = [];
         for (let u = -c.width / 2 - 1; u <= c.width / 2 + 1; u += 0.5) points.push(frame(c, supportStation(c, s, u), u));
@@ -1034,6 +1062,7 @@ export function addEnvironment(c, m, parent, fills) {
       nearSupport = (x, z) => supportLines.some(line => line.some(p => Math.hypot(p.x - x, p.z - z) < 1.6)),
       clearGround = (x, z, margin) => {
         for (const o of obstacles) {
+          if (o.type === 'land') continue;
           const p = coordinates(o, x, z);
           if (Math.abs(p.across - (o.type === 'water' ? riverWiggle(p.along, c) : 0)) < o.width / 2 + margin) return true;
         }
@@ -1045,7 +1074,7 @@ export function addEnvironment(c, m, parent, fills) {
       rng,
       seed: c.seed,
       budget: grassBudget[tier] ?? grassBudget.balanced,
-      height: terrainHeight,
+      height: grassHeight,
       occupied: (x, z, margin) => clearGround(x, z, margin) || nearWater(x, z),
       // Wet river banks grow sedges and reeds; 2H:1V slopes and embankments dry bunch grass.
       zone: (x, z) => {
@@ -1056,8 +1085,8 @@ export function addEnvironment(c, m, parent, fills) {
             h = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
           if (d < 5.5 && h - Math.floor(h) < 0.75 - d * 0.08) return 'tall';
         }
-        const gx = terrainHeight(x + 0.8, z) - terrainHeight(x - 0.8, z),
-          gz = terrainHeight(x, z + 0.8) - terrainHeight(x, z - 0.8);
+        const gx = grassHeight(x + 0.8, z) - grassHeight(x - 0.8, z),
+          gz = grassHeight(x, z + 0.8) - grassHeight(x, z - 0.8);
         return Math.hypot(gx, gz) / 1.6 > 0.26 ? 'dry' : 'meadow';
       },
     });

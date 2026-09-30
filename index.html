@@ -168,7 +168,7 @@
               <h3 class="section-label">Crossfall & markings</h3>
               <label
                 >Deck crossfall<select name="crossfall">
-                  <option value="crown">Crown · 2 % each side of the crown line</option>
+                  <option value="crown">Crown · 2 % each side of the center line</option>
                   <option value="right">Uniform · falling to the right</option>
                   <option value="left">Uniform · falling to the left</option>
                   <option value="flat">Flat · no crossfall</option>
@@ -182,7 +182,7 @@
                     <option value="4">4 %</option>
                   </select></label
                 ><label id="crown-offset-label"
-                  >Crown line offset · m<input name="crownOffset" type="number" min="-15" max="15" step="0.05"
+                  >Center line offset · m<input name="crownOffset" type="number" min="-15" max="15" step="0.05"
                 /></label>
               </div>
               <label
@@ -280,7 +280,7 @@
                 >Bridge lighting<select name="lighting">
                   <option value="none">None</option>
                   <option value="poles">LED street lights · poles</option>
-                  <option value="handrail">LED in 20C handrail</option>
+                  <option value="handrail">LED under 20C / SDC handrail</option>
                 </select></label
               ><label
                 >Spacing · m<input name="lightSpacing" type="number" min="2" max="80" step="0.5" /></label
@@ -298,7 +298,7 @@
               >
               <p class="hint">
                 Lights switch on from 20:00 to 06:30. Street lights on 10 m poles default to 30 m; handrail LEDs under the
-                top rail of 20C railings default to 3 m.
+                top rail of 20C or SDC railings default to 3 m.
               </p>
             </div>
           </section>
@@ -398,10 +398,10 @@
             <div class="panel-column">
               <h3 class="section-label">Material finish</h3>
               <label
-                >Concrete finish<select name="concreteFinish">
-                  <option value="rough">Rough · fine aggregate</option>
-                  <option value="formwork">Smooth formwork · panel joints, tie holes</option>
-                  <option value="weathered">Weathered · runoff streaks, darker patina</option>
+                >Concrete colour<select name="concreteFinish">
+                  <option value="rough">Original concrete</option>
+                  <option value="light">Cool grey · reference 1</option>
+                  <option value="warm">Warm pale grey · reference 2</option>
                 </select></label
               >
               <div id="steel-color-controls">
@@ -492,6 +492,7 @@
                 /></label>
               </div>
               <div id="bent-settings" class="field-grid">
+                <label>Taper starts at |y| · m<input name="bentTaperStart" type="number" min="0" max="30" step=".1" /></label>
                 <label>Bent cap width · m<input name="bentWidth" type="number" min=".5" max="5" step=".1" /></label
                 ><label
                   >Bent cap thickness · m<input
@@ -519,7 +520,7 @@
                   >Head thickness · m<input name="hammerheadThickness" type="number" min="0.35" max="2" step="0.05"
                 /></label>
               </div>
-              <p class="hint">One pier arrangement for all interior supports. Bearings 75 mm on 150 mm plinths.</p>
+              <p class="hint">One pier arrangement for all interior supports. Bearings 75 mm; level plinths vary with the deck profile (100 mm minimum). Taper start: 0 = outer column face.</p>
             </div>
             <div class="panel-column">
               <h3 class="section-label">Abutments</h3>
@@ -531,6 +532,10 @@
               ><label id="wing-angle-label"
                 >Outward flare · °<input name="wingAngle" type="number" min="0" max="90" step="5" /></label
               ><label class="check"><input name="girderScreens" type="checkbox" />Girder screens (cache-poutres)</label
+              ><label>Approach retaining walls<select name="approachWalls">
+                  <option value="none">Embankments</option>
+                  <option value="mse">TSM / MSE · concrete panels</option>
+                </select></label
               ><label class="check"><input name="frontSlope" type="checkbox" />Slope in front of abutments</label
               ><label
                 >Slope start below seat · m<input name="frontSlopeDrop" type="number" min="0" max="15" step="0.1"
@@ -563,11 +568,6 @@
             <div class="panel-column">
               <h3 class="section-label">Landscape</h3>
               <label
-                >Viewport background<select name="background">
-                  <option value="blue">Blue · studio</option>
-                  <option value="white">Pure white</option>
-                </select></label
-              ><label
                 >Sky<select name="skyMode">
                   <option value="clear">Clear gradient</option>
                   <option value="clouds">Dynamic clouds</option>
@@ -632,6 +632,9 @@
       </aside>
       <section id="viewport" aria-label="Interactive 3D bridge">
         <div id="canvasHost"></div>
+        <div id="scene-loading" class="scene-loading" role="status" aria-live="polite" hidden>
+          <img src="./favicon.svg" alt="" width="44" height="44"><span>Building your bridge…</span>
+        </div>
         <div id="sectionHost" hidden>
           <div class="section-toolbar">
             <label for="sectionStation">Section at station <output id="sectionStationLabel"></output></label
@@ -737,9 +740,10 @@
     </dialog>
     <script type="module">
       // Launch sequence first, so it shows while the 3D modules load.
-      import { startIntro } from './intro.mjs';
+      import { startIntro } from './modules/intro.mjs';
       window.bridgeIntro = startIntro();
+      await window.bridgeIntro.painted;
+      await import('./modules/app.mjs');
     </script>
-    <script type="module" src="./app.mjs"></script>
   </body>
 </html>

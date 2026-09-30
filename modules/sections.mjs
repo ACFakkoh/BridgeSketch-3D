@@ -1,6 +1,6 @@
 // BridgeSketch 3D · Cross-sections and generic solids: swept sections, chamfers, skew-plane plates, walls.
 import * as T from 'three';
-import { crossAt, frame, profile, stations, supportStation, girderTop, girderDepth } from './geometry.mjs';
+import { crossAt, crossfallSection, frame, profile, stations, supportStation, girderTop, girderDepth } from './geometry.mjs';
 
 // NEBT nominal metric geometry: top 1200, bottom 810, web 180 mm.
 // ponytail: small fillets are sampled curves for viewing; shop-detail accuracy needs the owner's exact drawing revision.
@@ -108,11 +108,8 @@ export function chamferSection(points) {
 // false → no crossfall (terrain-referenced solids).
 export function sweep(c, a, b, section, mat, height = profile, segments, crossU) {
   const rawSection = typeof section === 'function' ? section : () => section;
-  const sectionAt =
-    mat.userData.chamfer && height === profile ? station => chamferSection(rawSection(station)) : rawSection;
-  const initial = sectionAt(a),
-    n = initial.length,
-    steps = segments ?? Math.max(1, Math.ceil((b - a) / (c.variableDepth ? 0.4 : c.curved ? 1.5 : 3))),
+  const sectionAt = mat.userData.chamfer && height === profile ? station => chamferSection(rawSection(station)) : rawSection;
+  const steps = segments ?? Math.max(1, Math.ceil((b - a) / (c.variableDepth ? 0.4 : c.curved ? 1.5 : 3))),
     pos = [],
     uv = [],
     indices = [];
@@ -122,8 +119,20 @@ export function sweep(c, a, b, section, mat, height = profile, segments, crossU)
   samples.sort((a, b) => a - b);
   const unique = samples.filter((s, i) => i === 0 || s - samples[i - 1] > 1e-7),
     count = unique.length - 1;
-  const rings = unique.map(station =>
-    sectionAt(station).map(([u, v]) => {
+  let shapes = unique.map(sectionAt);
+  if (crossU === undefined && c.crossfall === 'crown') {
+    // A varying box width can move an edge across the centre line: retain the same ring topology.
+    const splitEdges = new Set(),
+      centre = c.crownOffset ?? 0;
+    for (const shape of shapes)
+      shape.forEach((p, i) => {
+        if ((p[0] - centre) * (shape[(i + 1) % shape.length][0] - centre) < 0) splitEdges.add(i);
+      });
+    shapes = shapes.map(shape => crossfallSection(c, shape, splitEdges));
+  }
+  const n = shapes[0].length;
+  const rings = unique.map((station, j) =>
+    shapes[j].map(([u, v]) => {
       const s = supportStation(c, station, u),
         p = frame(c, s, u);
       return [p.x, height(c, s, v, u) + v + (crossU === false ? 0 : crossAt(c, crossU ?? u)), p.z];
@@ -149,7 +158,7 @@ export function sweep(c, a, b, section, mat, height = profile, segments, crossU)
     [count, Math.max(0, count - 1)],
   ]) {
     const offset = pos.length / 3,
-      shape = sectionAt(unique[ring]),
+      shape = shapes[ring],
       a = centre(rings[ring]),
       b = centre(rings[neighbour]),
       out = a.map((v, k) => v - b[k]);
@@ -158,7 +167,7 @@ export function sweep(c, a, b, section, mat, height = profile, segments, crossU)
       uv.push(shape[k][0] / 4, shape[k][1] / 4);
     }
     T.ShapeUtils.triangulateShape(
-      shape.map(([u, v]) => new T.Vector2(u, v)),
+      shape.map(([u], k) => new T.Vector2(u, rings[ring][k][1])),
       [],
     ).forEach(([x, y, z]) => {
       const p = rings[ring][x],
@@ -182,7 +191,7 @@ export function sweep(c, a, b, section, mat, height = profile, segments, crossU)
   return mesh;
 }
 
-export function clipMeshAtCut(mesh, target, start) {
+export function clipMeshAtCut(mesh, target, start, cap = false) {
   mesh.updateMatrixWorld(true);
   const bounds = new T.Box3().setFromObject(mesh);
   if (start ? bounds.min.x >= target - 1e-6 : bounds.max.x <= target + 1e-6) return;
@@ -223,6 +232,41 @@ export function clipMeshAtCut(mesh, target, start) {
         uv.push(...v.uv);
       }
   }
+  if (cap) {
+    // ponytail: convex cut caps; triangulate separate contours if concave solids ever need caps.
+    // Keep every cut edge, including collinear triangle intersections.
+    const nodes = new Map(),
+      edges = new Map(),
+      key = p => p.map(v => Math.round(v * 1e5)).join(',');
+    for (let i = 0; i < values.length; i += 9)
+      for (let j = 0; j < 3; j++) {
+        const a = i + j * 3,
+          b = i + ((j + 1) % 3) * 3,
+          p = values.slice(a, a + 3),
+          q = values.slice(b, b + 3);
+        if (Math.abs(p[0] - target) > 1e-6 || Math.abs(q[0] - target) > 1e-6) continue;
+        const pk = key(p), qk = key(q);
+        if (pk === qk) continue;
+        nodes.set(pk, { p, uv: uv.slice((a / 3) * 2, (a / 3) * 2 + 2) });
+        nodes.set(qk, { p: q, uv: uv.slice((b / 3) * 2, (b / 3) * 2 + 2) });
+        const edge = [pk, qk].sort().join('|'),
+          saved = edges.get(edge);
+        if (saved) saved.count++;
+        else edges.set(edge, { a: pk, b: qk, count: 1 });
+      }
+    const boundary = [...edges.values()].filter(e => e.count === 1),
+      keys = [...new Set(boundary.flatMap(e => [e.a, e.b]))],
+      centre = keys.reduce((c, k) => c.map((v, i) => v + nodes.get(k).p[i] / keys.length), [0, 0, 0]),
+      centreUV = keys.reduce((c, k) => c.map((v, i) => v + nodes.get(k).uv[i] / keys.length), [0, 0]);
+    for (const edge of boundary) {
+      const p = nodes.get(edge.a),
+        q = nodes.get(edge.b),
+        normal = (p.p[1] - centre[1]) * (q.p[2] - centre[2]) - (p.p[2] - centre[2]) * (q.p[1] - centre[1]),
+        ordered = (start ? normal > 0 : normal < 0) ? [q, p] : [p, q];
+      values.push(...centre, ...ordered[0].p, ...ordered[1].p);
+      uv.push(...centreUV, ...ordered[0].uv, ...ordered[1].uv);
+    }
+  }
   const cut = new T.BufferGeometry();
   cut.setAttribute('position', new T.Float32BufferAttribute(values, 3));
   cut.setAttribute('uv', new T.Float32BufferAttribute(uv, 2));
@@ -243,7 +287,7 @@ export function boxGirder(c, a, b, u, mat) {
       const d = girderDepth(c, supportStation(c, station, u), u);
       return boxSection(d, c.boxTopWidth, c.boxBottomWidth, 0.05, c.web)[plate].map(([x, y]) => [x + u, y]);
     };
-    const mesh = sweep(c, a, b, section, mat, (_, s) => girderTop(c, 0, s), undefined, u);
+    const mesh = sweep(c, a, b, section, mat, (_, s) => girderTop(c, 0, s, u));
     mesh.name = 'Box ' + plate;
     group.add(mesh);
   }
@@ -385,7 +429,7 @@ function skewPlate(parent, mat, c, s, outline, thickness, name) {
   return mesh;
 }
 
-export function profiledSupportWall(parent, mat, c, station, u0, u1, thickness, bottomAt, topAt) {
+export function profiledSupportWall(parent, mat, c, station, u0, u1, thickness, bottomAt, topAt, cuts = []) {
   const triangles = [],
     steps = Math.max(1, Math.ceil((u1 - u0) / 0.4)),
     ring = u => {
@@ -414,9 +458,12 @@ export function profiledSupportWall(parent, mat, c, station, u0, u1, thickness, 
   const face = (a, b, d, e) => {
     triangles.push(...a, ...b, ...d, ...a, ...d, ...e);
   };
-  let previous = ring(u0);
-  for (let j = 1; j <= steps; j++) {
-    const next = ring(u0 + ((u1 - u0) * j) / steps);
+  const us = [...new Set([...Array.from({ length: steps + 1 }, (_, j) => u0 + ((u1 - u0) * j) / steps), ...cuts])]
+    .filter(u => u >= u0 && u <= u1)
+    .sort((a, b) => a - b);
+  let previous = ring(us[0]);
+  for (const u of us.slice(1)) {
+    const next = ring(u);
     for (let k = 0; k < previous.length; k++)
       face(previous[k], next[k], next[(k + 1) % previous.length], previous[(k + 1) % previous.length]);
     previous = next;
@@ -452,7 +499,7 @@ export function profiledSupportWall(parent, mat, c, station, u0, u1, thickness, 
 }
 
 export function soffitAt(c, i, s, u = 0) {
-  return girderTop(c, i, s) + crossAt(c, u) - girderDepth(c, s, u);
+  return girderTop(c, i, s, u) + crossAt(c, u) - girderDepth(c, s, u);
 }
 
 // Plate in the skewed support plane between u0 and u1 whose top and bottom follow the deck crossfall
