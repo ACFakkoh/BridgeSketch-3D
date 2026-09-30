@@ -2,7 +2,7 @@
 
 Mise à jour : 2026-09-30. Source de vérité pour les changements locaux et leur état de publication.
 
-## 0.6.0 — commentaires du 2026-09-29 et ajouts en bas du compte rendu (local, non publié)
+## 0.6.0 — commentaires du 2026-09-29 et ajouts en bas du compte rendu (publié le 2026-09-30)
 
 - [x] Couronne réelle à deux pentes, dalle d'épaisseur constante, libellé « Center line », blocs d'assise variables (minimum 100 mm), goussets de 20 à 120 mm.
 - [x] Distance de début d'effilement du chevêtre réglable.
@@ -11,7 +11,8 @@ Mise à jour : 2026-09-30. Source de vérité pour les changements locaux et leu
 - [x] Murs d'approche TSM à panneaux, fermés aux extrémités; logo de chargement; édition persistante des dimensions d'obstacles.
 - [x] Blue studio seul, bandeau compact, Focus plein écran desktop/mobile, introduction pré-rendue en boucle de 2 s.
 - [x] Temps deux fois plus lent, zoom rapproché et pan plus sensible, sept exemples variés, modules regroupés dans `dist/modules/`.
-- [ ] Push GitHub à décider ensuite avec Anthony.
+- [x] Push GitHub sur `main` : [3cfd498](https://github.com/ACFakkoh/BridgeSketch-3D/commit/3cfd498a2493f0da0d98669b1aa8a35487218ddc), modules et documents rangés, déploiement Pages réussi et fichiers servis vérifiés.
+- [x] Site public testé dans Edge/Chromium : sept scènes, couronne, édition des obstacles, Focus desktop/mobile et export PNG, sans erreur JavaScript/WebGL ni ressource manquante.
 
 Compte rendu détaillé : `Codex outputs/Compte-rendu-BridgeSketch-0.6.0-2026-09-30.md`.
 

@@ -1,6 +1,6 @@
 # BridgeSketch 3D
 
-## 0.6.0 — revue du 2026-09-29, terminée le 2026-09-30 — local, non publié
+## 0.6.0 — revue du 2026-09-29, publiée le 2026-09-30
 
 Source : uniquement la page Notion « BridgeSketch 3D 0.6.0 — Compte rendu 2026-09-28 puis commentaires 2026-09-29 ».
 
@@ -12,7 +12,7 @@ Source : uniquement la page Notion « BridgeSketch 3D 0.6.0 — Compte rendu 202
 - Introduction : image pré-rendue animée par CSS en boucle de 2 s jusqu'à disponibilité de la scène. Temps deux fois plus lent, zoom plus proche, pan plus sensible.
 - Sept exemples couvrent plusieurs systèmes, 1 à 8 travées, pluie/neige/automne/été, tailles de terrain et heures variées. Modules JavaScript regroupés dans `dist/modules/`; lancement et contrôles hors ligne adaptés.
 
-Rapport et captures : `Codex outputs/Compte-rendu-BridgeSketch-0.6.0-2026-09-30.md`. Aucun commit ni push pour cette revue.
+Rapport et captures locaux : `Codex outputs/Compte-rendu-BridgeSketch-0.6.0-2026-09-30.md`. Publication : [3cfd498](https://github.com/ACFakkoh/BridgeSketch-3D/commit/3cfd498a2493f0da0d98669b1aa8a35487218ddc). Le dépôt regroupe 24 modules dans `modules/` et les documents de suivi dans `docs/`; la racine passe de 36 à 9 fichiers. Le déploiement GitHub Pages est réussi et les fichiers publiés correspondent à cette version.
 
 ## 0.6.0 — 2026-09-28 — Anthony Chéruel
 
