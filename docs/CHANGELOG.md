@@ -1,5 +1,13 @@
 # BridgeSketch 3D
 
+## Non publié — notes Notion du 2026-10-01 (en cours, voir PLAN-2026-10-01.md)
+
+- NEBT : plus d'option de hauteur variable (masquée dans l'interface, forcée à `false` à la validation).
+- Béton : couleur d'origine retirée, libellés « Cool grey » / « Warm pale grey » sans « reference » ; gris froid par défaut pour les 7 concepts (les anciens liens `rough` passent en gris froid).
+- Performance : l'édition d'un paramètre ne montre plus le logo de chargement ni ne précompile les shaders (réservé au changement de modèle). Cause du gel corrigée : le semis d'herbe (~40 000 touffes) est mis en cache tant que le terrain ne change pas, et ses tests de hauteur/appuis utilisent des boîtes englobantes.
+- Piles : extrémités des murs arrondies, en pointe ou carrées ; hammerhead à fût rectangulaire, à côtés arrondis ou évasé (congé courbe), tête effilée (épaisseur au fût / en bout) ; portique à poteaux carrés/rectangulaires inclinés (traverse optionnelle) ; pile en V avec ou sans chevêtre.
+- Rendu : bloom léger à chaîne de mips (technique Call of Duty / Unreal), MSAA 4× conservé, vignettage discret ; actif en Balanced et High, désactivable (« Glow »).
+
 ## 0.6.0 — revue du 2026-09-29, publiée le 2026-09-30
 
 Source : uniquement la page Notion « BridgeSketch 3D 0.6.0 — Compte rendu 2026-09-28 puis commentaires 2026-09-29 ».

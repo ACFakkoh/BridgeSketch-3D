@@ -4,9 +4,9 @@
 // budget and the distances used by the tree and grass levels of detail.
 export const tiers = ['performance', 'balanced', 'high'];
 export const renderSettings = {
-  performance: { reflection: 0, shadow: 2048, pixelRatio: 1, treeNear: 40, grassNear: 16, grassFar: 55 },
-  balanced: { reflection: 0.5, shadow: 4096, pixelRatio: 1.25, treeNear: 70, grassNear: 26, grassFar: 90 },
-  high: { reflection: 0.75, shadow: 4096, pixelRatio: 2, treeNear: 120, grassNear: 45, grassFar: 150 },
+  performance: { reflection: 0, shadow: 2048, pixelRatio: 1, bloom: 0, treeNear: 40, grassNear: 16, grassFar: 55 },
+  balanced: { reflection: 0.5, shadow: 4096, pixelRatio: 1.25, bloom: 0.08, treeNear: 70, grassNear: 26, grassFar: 90 },
+  high: { reflection: 0.75, shadow: 4096, pixelRatio: 2, bloom: 0.1, treeNear: 120, grassNear: 45, grassFar: 150 },
 };
 let gpuName = '',
   guessed = null,

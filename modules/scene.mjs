@@ -537,34 +537,53 @@ export function buildBridge(c, m, { batch = true } = {}) {
     } else if (c.structureSystem === 'strutted' && mono) {
       addStrutLeg(c, m, structure, j, earth);
     } else if (c.pierType === 'wall' || (integral && c.pierType === 'hammerhead')) {
-      const wall = profiledSupportWall(
-        structure,
-        m.concrete,
-        c,
-        s,
-        -half + 0.15,
-        half - 0.15,
-        c.wallThickness,
-        () => earth,
-        seatAt,
-      );
+      // Rounded or pointed (90° cutwater) ends stay within the original wall length.
+      const t = c.wallThickness,
+        shaped = c.pierType === 'wall' && c.wallEnds !== 'square',
+        end = half - 0.15 - (shaped ? t / 2 : 0);
+      const wall = profiledSupportWall(structure, m.concrete, c, s, -end, end, t, () => earth, seatAt);
       wall.name = 'Pier wall';
+      if (shaped)
+        for (const u of [-end, end]) {
+          const f = supportBasis(c, s, u),
+            top = Math.min(seatAt(u, -t / 2), seatAt(u, t / 2));
+          pierNose(structure, m.concrete, f, earth, top, t, c.wallEnds);
+        }
     } else {
-      const bent = c.pierType === 'bent',
-        capHeight = c.hammerheadThickness,
-        capWidth = bent ? c.bentWidth : c.hammerheadThickness;
-      // Outer columns at the chosen spacing (auto: 64 % of the deck), the others equally spaced.
-      const spread = c.columnSpread > 0 ? c.columnSpread : c.width * 0.64;
-      // Bent cap: user-selected transverse start of the straight taper; zero retains the automatic column-face start.
+      const bent = c.pierType !== 'hammerhead',
+        capWidth = bent ? c.bentWidth : c.hammerheadThickness,
+        // V pier without a cap: the arms carry the outer bearings directly (box and slab decks, as built).
+        capped = !(c.pierType === 'vshape' && !c.vCap);
+      // Outer columns at the chosen spacing (auto: 64 % of the deck), the others equally spaced. A portal has two
+      // legs; a V pier two arms from one footing, opening by vAngle from the vertical (or reaching the outer
+      // bearings when there is no cap).
+      const columns = c.pierType === 'portal' ? 2 : c.columns,
+        spread = c.columnSpread > 0 ? c.columnSpread : c.width * 0.64,
+        outerBearing = Math.max(0.6, ...bearingPositions(c).map(Math.abs)),
+        vTop = capped
+          ? Math.tan((c.vAngle * Math.PI) / 180) * Math.max(1, seatAt(0) - c.bentThickness - earth - 0.6) +
+            c.vArmThickness / 2
+          : Math.min(half - 0.15 - c.vArmThickness / 2, outerBearing);
+      // Cap: user-selected transverse start of the straight taper; zero retains the automatic column-face start.
       const tip = half - 0.15,
-        taperStart = c.bentTaperStart > 0 ? c.bentTaperStart : Math.min(tip - 0.3, c.columns > 1 ? spread / 2 + c.columnDiameter / 2 : c.columnDiameter / 2);
+        autoStart =
+          c.pierType === 'hammerhead'
+            ? c.hammerheadWidth / 2 + (c.hammerheadShape === 'flared' ? c.hammerheadFlare : 0)
+            : c.pierType === 'vshape'
+              ? vTop + c.vArmThickness / 2
+              : columns > 1
+                ? spread / 2 + c.columnDiameter / 2
+                : c.columnDiameter / 2,
+        taperStart = Math.max(0, Math.min(tip - 0.3, c.bentTaperStart > 0 && bent ? c.bentTaperStart : autoStart));
       const capDepthAt = u => {
-        if (integral) return 0;
-        if (!bent) return capHeight;
+        if (integral || !capped) return 0;
         const t = Math.max(0, Math.min(1, (Math.abs(u) - taperStart) / Math.max(0.01, tip - taperStart)));
-        return c.bentThickness + (c.bentEndThickness - c.bentThickness) * t;
+        return bent
+          ? c.bentThickness + (c.bentEndThickness - c.bentThickness) * t
+          : c.hammerheadCapDepth + (c.hammerheadCapEndDepth - c.hammerheadCapDepth) * t;
       };
-      if (!integral) {
+      const capBottom = (u, offset) => seatAt(u, offset) - capDepthAt(u);
+      if (!integral && capped) {
         const cap = profiledSupportWall(
           structure,
           m.concrete,
@@ -573,34 +592,109 @@ export function buildBridge(c, m, { batch = true } = {}) {
           -half + 0.15,
           half - 0.15,
           capWidth,
-          (u, offset) => seatAt(u, offset) - capDepthAt(u),
+          capBottom,
           (u, offset) => seatAt(u, offset),
           [-taperStart, taperStart],
         );
         cap.name = 'Pier cap';
       }
+      const capUnder = u => Math.max(capBottom(u, -capWidth / 2), capBottom(u, capWidth / 2));
+      if (c.pierType === 'vshape') {
+        // Two inclined arms from one footing to the cap soffit (or the bearing seats), meeting at the footing.
+        // Horizontal end faces; the arm depth along the road is the cap width.
+        const a = c.vArmThickness,
+          depth = capWidth,
+          f0 = supportBasis(c, s, 0);
+        for (const side of [-1, 1]) {
+          const u = side * vTop,
+            ft = supportBasis(c, s, u),
+            top = capped ? capUnder(u) + 0.05 : Math.min(seatAt(u, -depth / 2), seatAt(u, depth / 2)),
+            arm = leg(
+              structure,
+              m.concrete,
+              f0,
+              new T.Vector3(f0.x + (f0.ax * side * a) / 2, earth + 0.3, f0.z + (f0.az * side * a) / 2),
+              new T.Vector3(ft.x, top, ft.z),
+              a,
+              depth,
+            );
+          arm.name = 'V pier arm';
+        }
+        box(structure, m.concrete, f0.x, earth + 0.2, f0.z, 2 * a + 0.8, 0.6, depth + 0.6, f0.angle);
+      }
       const us =
-        c.pierType === 'hammerhead' || c.columns === 1
-          ? [0]
-          : Array.from({ length: c.columns }, (_, n) => -spread / 2 + (n * spread) / (c.columns - 1));
+        c.pierType === 'vshape'
+          ? []
+          : c.pierType === 'hammerhead' || columns === 1
+            ? [0]
+            : Array.from({ length: columns }, (_, n) => -spread / 2 + (n * spread) / (columns - 1));
       for (const u of us) {
         const f = supportBasis(c, s, u),
-          height = Math.max(seatAt(u, -capWidth / 2), seatAt(u, capWidth / 2)) - capDepthAt(u) - earth;
+          height = capUnder(u) - earth;
+        if (c.pierType === 'portal') {
+          // Square or rectangular portal legs, inclined in the support plane: the batter is the inward offset of
+          // each footing (negative: legs spread towards the ground). Horizontal top and bottom faces.
+          const fb = supportBasis(c, s, u - Math.sign(u) * c.portalBatter),
+            thickness = c.columnShape === 'rectangular' ? c.columnThickness : c.columnDiameter,
+            post = leg(
+              structure,
+              m.concrete,
+              f,
+              new T.Vector3(fb.x, earth, fb.z),
+              new T.Vector3(f.x, earth + height + 0.05, f.z),
+              c.columnDiameter,
+              thickness,
+            );
+          post.name = 'Portal leg';
+          box(structure, m.concrete, fb.x, earth + 0.12, fb.z, c.columnDiameter + 0.3, 0.45, thickness + 0.3, f.angle);
+          continue;
+        }
         if (c.pierType === 'hammerhead') {
-          // Box local X follows the support line; skew is not added a second time.
-          const head = box(
-            structure,
-            m.concrete,
-            f.x,
-            earth + height / 2,
-            f.z,
-            c.hammerheadWidth,
-            height,
-            c.hammerheadThickness,
-            f.angle,
-          );
-          head.castShadow = true;
-          head.receiveShadow = true;
+          // Stem: local X follows the support line; skew is not added a second time. Oblong: rounded side faces.
+          // Flared: a concave fillet joins the stem to the head soffit on each side.
+          const w = c.hammerheadWidth,
+            d = c.hammerheadThickness,
+            oblong = c.hammerheadShape === 'oblong' && w > d;
+          const stem = box(structure, m.concrete, f.x, earth + height / 2, f.z, oblong ? w - d : w, height, d, f.angle);
+          stem.name = 'Hammerhead stem';
+          if (oblong)
+            for (const side of [-1, 1])
+              pierNose(
+                structure,
+                m.concrete,
+                { ...f, x: f.x + (f.ax * side * (w - d)) / 2, z: f.z + (f.az * side * (w - d)) / 2 },
+                earth,
+                earth + height,
+                d,
+                'round',
+              );
+          if (c.hammerheadShape === 'flared' && !integral) {
+            const reach = Math.min(c.hammerheadFlare, tip - w / 2 - 0.2),
+              rise = Math.min(reach * 1.2, height * 0.6);
+            for (const side of [-1, 1]) {
+              if (reach <= 0.1) break;
+              const a = side < 0 ? -w / 2 - reach : w / 2 - 0.02,
+                b = side < 0 ? -w / 2 + 0.02 : w / 2 + reach,
+                fillet = profiledSupportWall(
+                  structure,
+                  m.concrete,
+                  c,
+                  s,
+                  a,
+                  b,
+                  d,
+                  (q, offset) => {
+                    const t = Math.min(1, Math.max(0, (Math.abs(q) - w / 2) / reach));
+                    return capBottom(q, offset) - rise * (1 - Math.sqrt(1 - (1 - t) ** 2));
+                  },
+                  (q, offset) => capBottom(q, offset) + 0.02,
+                  Array.from({ length: 13 }, (_, k) => a + ((b - a) * k) / 12),
+                );
+              fillet.name = 'Hammerhead flare';
+            }
+          }
+          box(structure, m.concrete, f.x, earth + 0.12, f.z, w + 0.3, 0.45, d + 0.3, f.angle);
+          continue;
         } else if (c.columnShape !== 'round') {
           // Square, or rectangular: width across the support line, thickness along the road.
           const thickness = c.columnShape === 'rectangular' ? c.columnThickness : c.columnDiameter,
@@ -616,8 +710,18 @@ export function buildBridge(c, m, { batch = true } = {}) {
           column.receiveShadow = true;
           structure.add(column);
         }
-        const plinth = c.pierType === 'bent' && c.columnShape === 'rectangular' ? c.columnThickness : c.columnDiameter;
+        const plinth = c.columnShape === 'rectangular' ? c.columnThickness : c.columnDiameter;
         box(structure, m.concrete, f.x, earth + 0.12, f.z, c.columnDiameter + 0.3, 0.45, plinth + 0.3, f.angle);
+      }
+      if (c.pierType === 'portal' && c.portalBeam) {
+        // Tie beam between the portal legs at mid-height.
+        const f = supportBasis(c, s, 0),
+          y = earth + 0.5 * (capUnder(0) - earth),
+          inner = spread - c.columnDiameter - c.portalBatter;
+        if (inner > 0.2) {
+          const beam = box(structure, m.concrete, f.x, y, f.z, inner, Math.min(1.2, c.columnDiameter), c.columnDiameter * 0.8, f.angle);
+          beam.name = 'Portal tie beam';
+        }
       }
     }
     if (c.continuous && c.material === 'concrete' && interior) {
@@ -902,6 +1006,42 @@ export function buildBridge(c, m, { batch = true } = {}) {
     traffic: deck.children.find(o => o.name === 'Traffic'),
     config: c,
   };
+}
+
+// Inclined leg or arm with horizontal end faces: footing centre p0, top centre p1; section w along the support
+// line (f.ax, f.az) and d square to it in plan.
+function leg(parent, mat, f, p0, p1, w, d) {
+  const geometry = new T.BoxGeometry(1, 1, 1),
+    pos = geometry.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i) * w,
+      z = pos.getZ(i) * d,
+      base = pos.getY(i) < 0 ? p0 : p1;
+    // (ax, up, -az/ax normal) is right-handed, so the box winding stays outward.
+    pos.setXYZ(i, base.x + f.ax * x - f.az * z, base.y, base.z + f.az * x + f.ax * z);
+  }
+  geometry.computeVertexNormals();
+  const mesh = new T.Mesh(geometry, mat);
+  mesh.castShadow = mesh.receiveShadow = true;
+  parent.add(mesh);
+  return mesh;
+}
+
+// Pier wall / stem end: half-round, or a 90° cutwater (a square prism turned 45°), centred on the end of the
+// straight part; width t along the road.
+function pierNose(parent, mat, f, bottom, top, t, shape) {
+  const height = top - bottom;
+  if (height <= 0.05) return null;
+  const mesh =
+    shape === 'pointed'
+      ? new T.Mesh(new T.BoxGeometry(t / Math.SQRT2, height, t / Math.SQRT2), mat)
+      : new T.Mesh(new T.CylinderGeometry(t / 2, t / 2, height, 24), mat);
+  mesh.position.set(f.x, bottom + height / 2, f.z);
+  mesh.rotation.y = f.angle + (shape === 'pointed' ? Math.PI / 4 : 0);
+  mesh.castShadow = mesh.receiveShadow = true;
+  mesh.name = shape === 'pointed' ? 'Pointed pier end' : 'Rounded pier end';
+  parent.add(mesh);
+  return mesh;
 }
 
 // TSM / MSE reference: staggered concrete panels, dark joints and alternating inset ribbed strips.

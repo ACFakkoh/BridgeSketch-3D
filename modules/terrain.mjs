@@ -594,6 +594,22 @@ function addPrism(parent, mat, o, halfLength, section) {
 }
 
 // Instanced copies grouped in square tiles (tile metres); each tile gets its own bounding sphere for culling.
+// Settings that never move the ground, fills, supports or roads; any other change rescatters the meadow.
+const cosmeticKeys = new Set([
+  'version', 'name', 'steelColor', 'fasciaColor', 'barrierType', 'leftRailing', 'rightRailing', 'sidewalkRailing',
+  'approachBarrier', 'lighting', 'lightSpacing', 'lightColor', 'lightSides', 'showTraffic', 'movingTraffic',
+  'waterStyle', 'skyMode', 'renderQuality', 'fog', 'weather', 'background', 'timeOfDay', 'timeFlow', 'trainStyle',
+  'centreLine', 'concreteFinish', 'girderScreens', 'skyModel',
+  // Pier details: the meadow clearance around supports depends only on the support lines.
+  'pierType', 'columns', 'columnShape', 'columnDiameter', 'columnThickness', 'columnSpread', 'bentWidth',
+  'bentThickness', 'bentEndThickness', 'bentTaperStart', 'hammerheadWidth', 'hammerheadThickness', 'wallThickness',
+  'wallEnds', 'hammerheadShape', 'hammerheadCapWidth', 'hammerheadCapDepth', 'hammerheadCapEndDepth', 'portalBatter',
+  'portalBeam', 'vAngle', 'vArmThickness', 'vCap', 'hammerheadFlare', 'bloom',
+]);
+let meadowCache = { key: null, value: null };
+const meadowCacheKey = (c, tier) =>
+  tier + JSON.stringify(Object.entries(c).filter(([k]) => !cosmeticKeys.has(k)));
+
 function instancedTiles(parent, geometry, material, items, tile, transform, colour) {
   const tiles = new Map(),
     meshes = [],
@@ -1038,28 +1054,45 @@ export function addEnvironment(c, m, parent, fills) {
       });
     // Grass continues on open ground and grass slopes; roads, stone/concrete faces and supports stay clear.
     const groundZones = roadFootprints(c, Object.assign(fills.filter(face => face.finish !== 'grass'), { ranges: fills.ranges }), false),
-      grassFaces = fills.filter(face => face.finish === 'grass'),
-      // ponytail: scan the approach triangles; add a spatial index if larger landscapes make this costly.
+      // Approach triangles with their plan bounding boxes, precomputed once: the meadow samples them many thousand
+      // times per rebuild.
+      grassTriangles = fills
+        .filter(face => face.finish === 'grass')
+        .flatMap(face =>
+          face.slice(1, -1).map((b, i) => {
+            const a = face[0],
+              d = face[i + 2];
+            return {
+              a, b, d,
+              area: (b[0] - a[0]) * (d[2] - a[2]) - (b[2] - a[2]) * (d[0] - a[0]),
+              x0: Math.min(a[0], b[0], d[0]), x1: Math.max(a[0], b[0], d[0]),
+              z0: Math.min(a[2], b[2], d[2]), z1: Math.max(a[2], b[2], d[2]),
+            };
+          }),
+        )
+        .filter(t => Math.abs(t.area) >= 1e-8),
       grassHeight = (x, z) => {
-        for (const face of grassFaces)
-          for (let i = 1; i < face.length - 1; i++) {
-            const [a, b, d] = [face[0], face[i], face[i + 1]],
-              bx = b[0] - a[0], bz = b[2] - a[2], dx = d[0] - a[0], dz = d[2] - a[2],
-              area = bx * dz - bz * dx;
-            if (Math.abs(area) < 1e-8) continue;
-            const u = ((x - a[0]) * dz - (z - a[2]) * dx) / area,
-              v = (bx * (z - a[2]) - bz * (x - a[0])) / area;
-            if (u >= -1e-6 && v >= -1e-6 && u + v <= 1 + 1e-6)
-              return a[1] + u * (b[1] - a[1]) + v * (d[1] - a[1]) + 0.025;
-          }
+        for (const { a, b, d, area, x0, x1, z0, z1 } of grassTriangles) {
+          if (x < x0 - 1e-6 || x > x1 + 1e-6 || z < z0 - 1e-6 || z > z1 + 1e-6) continue;
+          const bx = b[0] - a[0], bz = b[2] - a[2], dx = d[0] - a[0], dz = d[2] - a[2],
+            u = ((x - a[0]) * dz - (z - a[2]) * dx) / area,
+            v = (bx * (z - a[2]) - bz * (x - a[0])) / area;
+          if (u >= -1e-6 && v >= -1e-6 && u + v <= 1 + 1e-6)
+            return a[1] + u * (b[1] - a[1]) + v * (d[1] - a[1]) + 0.025;
+        }
         return terrainHeight(x, z);
       },
-      supportLines = stations(c).slice(1, -1).flatMap(s => {
+      supportLines = stations(c).slice(1, -1).map(s => {
         const points = [];
         for (let u = -c.width / 2 - 1; u <= c.width / 2 + 1; u += 0.5) points.push(frame(c, supportStation(c, s, u), u));
-        return [points];
+        const xs = points.map(p => p.x), zs = points.map(p => p.z);
+        return { points, x0: Math.min(...xs) - 1.6, x1: Math.max(...xs) + 1.6, z0: Math.min(...zs) - 1.6, z1: Math.max(...zs) + 1.6 };
       }),
-      nearSupport = (x, z) => supportLines.some(line => line.some(p => Math.hypot(p.x - x, p.z - z) < 1.6)),
+      nearSupport = (x, z) =>
+        supportLines.some(
+          ({ points, x0, x1, z0, z1 }) =>
+            x >= x0 && x <= x1 && z >= z0 && z <= z1 && points.some(p => Math.hypot(p.x - x, p.z - z) < 1.6),
+        ),
       clearGround = (x, z, margin) => {
         for (const o of obstacles) {
           if (o.type === 'land') continue;
@@ -1068,10 +1101,12 @@ export function addEnvironment(c, m, parent, fills) {
         }
         return intersectsRoad(groundZones, x, z, margin) || nearSupport(x, z);
       };
-    const meadow = scatterMeadow({
+    // The scatter (about 40 000 tufts) dominates a rebuild: reuse it while nothing that shapes the ground changes.
+    const meadowKey = meadowCacheKey(c, tier);
+    if (meadowCache.key !== meadowKey) meadowCache = { key: meadowKey, value: scatterMeadow({
       extent,
       halfZ,
-      rng,
+      rng: seeded(c.seed * 7919 + 17), // own stream: a cache hit leaves the scene random sequence unchanged
       seed: c.seed,
       budget: grassBudget[tier] ?? grassBudget.balanced,
       height: grassHeight,
@@ -1089,7 +1124,8 @@ export function addEnvironment(c, m, parent, fills) {
           gz = grassHeight(x, z + 0.8) - grassHeight(x, z - 0.8);
         return Math.hypot(gx, gz) / 1.6 > 0.26 ? 'dry' : 'meadow';
       },
-    });
+    }) };
+    const meadow = meadowCache.value;
     const green = new T.Color(),
       dry = new T.Color('#e8d59a'),
       lawn = new T.Color('#b9d98a'),

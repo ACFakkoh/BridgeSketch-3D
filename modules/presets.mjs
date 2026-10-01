@@ -299,7 +299,7 @@ export const presets = [
       "timeOfDay": 16,
       "seed": 72,
       "structureSystem": "strutted",
-      "concreteFinish": "warm",
+      "concreteFinish": "light",
       "spans": [
         {
           "length": 24,
@@ -346,7 +346,7 @@ export const presets = [
       "timeOfDay": 6.8,
       "seed": 83,
       "structureSystem": "arch",
-      "concreteFinish": "warm",
+      "concreteFinish": "light",
       "spans": [
         {
           "length": 18,
@@ -419,7 +419,7 @@ export const presets = [
       "timeOfDay": 17.5,
       "seed": 118,
       "centreLine": "double",
-      "concreteFinish": "warm",
+      "concreteFinish": "light",
       "spans": [
         {
           "length": 28,

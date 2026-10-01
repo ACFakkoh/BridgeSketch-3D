@@ -46,7 +46,7 @@ const withClouds = material => {
   return material;
 };
 
-// Colours from the two supplied concrete references; the original Poly Haven maps remain unchanged.
+// Concrete tints (cool grey is the default); the original bright Poly Haven tint is no longer offered.
 export const concreteFinishes = { light: '#8f9a9e', warm: '#b5b4ab' };
 
 export function makeMaterials(onLoad = () => {}) {

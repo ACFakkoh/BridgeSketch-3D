@@ -399,9 +399,8 @@
               <h3 class="section-label">Material finish</h3>
               <label
                 >Concrete colour<select name="concreteFinish">
-                  <option value="rough">Original concrete</option>
-                  <option value="light">Cool grey · reference 1</option>
-                  <option value="warm">Warm pale grey · reference 2</option>
+                  <option value="light">Cool grey</option>
+                  <option value="warm">Warm pale grey</option>
                 </select></label
               >
               <div id="steel-color-controls">
@@ -469,6 +468,8 @@
                   <option value="bent">Column bent</option>
                   <option value="wall">Pier wall</option>
                   <option value="hammerhead">Hammerhead</option>
+                  <option value="portal">Portal frame</option>
+                  <option value="vshape">V pier</option>
                 </select></label
               >
               <div class="field-grid">
@@ -509,15 +510,46 @@
                   centre to centre (0 = automatic, 64 % of the deck); inner columns are equally spaced.
                 </p>
               </div>
-              <div id="wall-settings">
+              <div id="wall-settings" class="field-grid">
                 <label
                   >Wall thickness · m<input name="wallThickness" type="number" min="0.25" max="2" step="0.05"
-                /></label>
+                /></label
+                ><label
+                  >Wall ends<select name="wallEnds">
+                    <option value="round">Rounded</option>
+                    <option value="pointed">Pointed (cutwater)</option>
+                    <option value="square">Square</option>
+                  </select></label
+                >
+              </div>
+              <div id="portal-settings" class="field-grid">
+                <label>Leg inclination · m inward at footing<input name="portalBatter" type="number" min="-3" max="3" step=".05" /></label
+                ><label class="check"><input name="portalBeam" type="checkbox" /> Tie beam at mid-height</label>
+              </div>
+              <div id="vshape-settings" class="field-grid">
+                <label>Arm angle from vertical · °<input name="vAngle" type="number" min="5" max="40" step="1" /></label
+                ><label>Arm thickness · m<input name="vArmThickness" type="number" min=".4" max="2.5" step=".05" /></label>
+                <label class="check"><input name="vCap" type="checkbox" /> Cap beam (off: arms carry the outer bearings)</label>
               </div>
               <div id="hammerhead-settings" class="field-grid">
-                <label>Head width · m<input name="hammerheadWidth" type="number" min="1" max="8" step="0.05" /></label
+                <label>Stem width · m<input name="hammerheadWidth" type="number" min="1" max="8" step="0.05" /></label
                 ><label
-                  >Head thickness · m<input name="hammerheadThickness" type="number" min="0.35" max="2" step="0.05"
+                  >Stem thickness · m<input name="hammerheadThickness" type="number" min="0.35" max="2" step="0.05"
+                /></label
+                ><label
+                  >Stem section<select name="hammerheadShape">
+                    <option value="rectangular">Rectangular</option>
+                    <option value="oblong">Rounded sides</option>
+                    <option value="flared">Flared (curved transition)</option>
+                  </select></label
+                ><label
+                  >Head depth at stem · m<input name="hammerheadCapDepth" type="number" min="0.5" max="4" step="0.05"
+                /></label
+                ><label
+                  >Head depth at tips · m<input name="hammerheadCapEndDepth" type="number" min="0.3" max="4" step="0.05"
+                /></label
+                ><label id="hammerhead-flare-label"
+                  >Flare reach · m<input name="hammerheadFlare" type="number" min="0.3" max="6" step="0.1"
                 /></label>
               </div>
               <p class="hint">One pier arrangement for all interior supports. Bearings 75 mm; level plinths vary with the deck profile (100 mm minimum). Taper start: 0 = outer column face.</p>
@@ -589,6 +621,7 @@
                   <option value="balanced">Balanced · half-resolution reflection</option>
                   <option value="high">High · dense meadow, sharp reflection</option>
                 </select></label
+              ><label class="check"><input name="bloom" type="checkbox" /> Glow (bloom) · Balanced and High</label
               ><label
                 >Weather<select name="weather">
                   <option value="clear">Clear</option>

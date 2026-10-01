@@ -58,6 +58,17 @@ export const defaults = {
   hammerheadWidth: 2.4,
   hammerheadThickness: 1.0,
   wallThickness: 0.8,
+  wallEnds: 'round',
+  hammerheadShape: 'rectangular',
+  hammerheadCapDepth: 1.6,
+  hammerheadCapEndDepth: 0.8,
+  portalBatter: 0.8,
+  portalBeam: false,
+  vCap: true,
+  hammerheadFlare: 1.5,
+  bloom: true,
+  vAngle: 20,
+  vArmThickness: 1,
   skew: 0,
   curved: false,
   radius: 250,
@@ -100,7 +111,7 @@ export const defaults = {
   // Line between opposing directions: dashed yellow or a solid double yellow line.
   centreLine: 'dashed',
   // Concrete surface: rough (Poly Haven), smooth formwork with panel joints and tie holes, or weathered.
-  concreteFinish: 'rough',
+  concreteFinish: 'light',
   // Concrete girder screens (cache-poutres) at the abutments, flush under the deck edge.
   girderScreens: true,
   skyModel: 'stylised',
@@ -361,8 +372,8 @@ export function validate(raw) {
   if (typeof c.crownOffset !== 'number' || !Number.isFinite(c.crownOffset) || Math.abs(c.crownOffset) > c.width / 2)
     throw Error('Center line: enter an offset within the deck width.');
   if (!['dashed', 'double'].includes(c.centreLine)) throw Error('Select a dashed or double yellow centre line.');
-  c.concreteFinish = { formwork: 'light', weathered: 'warm' }[c.concreteFinish] ?? c.concreteFinish;
-  if (!['rough', 'light', 'warm'].includes(c.concreteFinish)) throw Error('Select a concrete finish.');
+  c.concreteFinish = { rough: 'light', formwork: 'light', weathered: 'warm' }[c.concreteFinish] ?? c.concreteFinish;
+  if (!['light', 'warm'].includes(c.concreteFinish)) throw Error('Select a concrete finish.');
   if (typeof c.girderScreens !== 'boolean') throw Error('Invalid girder screen option.');
   if (!['stylised', 'physical'].includes(c.skyModel)) throw Error('Select a sky model.');
   const cycling = c.trafficMode === 'cyclists';
@@ -382,6 +393,12 @@ export function validate(raw) {
     hammerheadWidth: [1, 8],
     hammerheadThickness: [0.35, 2],
     wallThickness: [0.25, 2],
+    hammerheadCapDepth: [0.5, 4],
+    hammerheadCapEndDepth: [0.3, 4],
+    portalBatter: [-3, 3],
+    hammerheadFlare: [0.3, 6],
+    vAngle: [5, 40],
+    vArmThickness: [0.4, 2.5],
     web: [0.008, 0.08],
     deck: [0.15, 0.6],
     asphalt: [0.025, 0.2],
@@ -452,7 +469,12 @@ export function validate(raw) {
     !['concrete', 'steel'].includes(c.barrierType) ||
     !['return', 'wing'].includes(c.abutmentType) ||
     !['none', 'left', 'right', 'both'].includes(c.sidewalkSide) ||
-    !['bent', 'wall', 'hammerhead'].includes(c.pierType) ||
+    !['bent', 'wall', 'hammerhead', 'portal', 'vshape'].includes(c.pierType) ||
+    !['round', 'pointed', 'square'].includes(c.wallEnds) ||
+    !['rectangular', 'oblong', 'flared'].includes(c.hammerheadShape) ||
+    typeof c.vCap !== 'boolean' ||
+    typeof c.bloom !== 'boolean' ||
+    typeof c.portalBeam !== 'boolean' ||
     !Number.isInteger(c.columns) ||
     c.columns < 1 ||
     c.columns > 6
@@ -489,6 +511,8 @@ export function validate(raw) {
   // All entry points (controls, files, links and agent tools) enforce the same rule.
   if (c.curved && c.material === 'concrete') c.material = 'steel';
   if (typeof c.variableDepth !== 'boolean') throw Error('Invalid variable-depth option.');
+  // Precast NEBT girders have a constant depth.
+  if (c.material === 'concrete') c.variableDepth = false;
   if (!['round', 'square', 'rectangular'].includes(c.columnShape))
     throw Error('Select round, square or rectangular columns.');
   // Outer column spacing (centre to centre); 0 keeps the automatic 64 % of the deck width.

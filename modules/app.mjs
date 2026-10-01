@@ -57,6 +57,7 @@ import { makeWeather } from './weather.mjs';
 import { makeAmbient } from './ambient.mjs';
 import { setVehicleLights } from './vehicles.mjs';
 import { grassUniforms } from './grass.mjs';
+import { createPost } from './post.mjs';
 import { cloudShadow, concreteFinishes } from './materials.mjs';
 import { renderSettings, effectiveQuality, setGpuName, stepDownAuto, gpuInfo } from './quality.mjs';
 
@@ -106,6 +107,9 @@ let timeAppliedAt = 0,
   bootAt = 0;
 // Render budgets per tier (quality.mjs): reflection scale, shadow map, pixel ratio, level-of-detail distances.
 const tier = () => renderSettings[effectiveQuality(config.renderQuality)];
+let post = null;
+// Every visible frame goes through the bloom chain unless the tier or the Glow option turns it off.
+const draw = () => post.render(scene, camera, { strength: config.bloom ? tier().bloom : 0 });
 // Frame statistics for the Stats overlay and the Auto quality: loop rate, CPU time and GPU time (timer query).
 const perf = { frames: 0, since: 0, fps: 0, cpu: 0, gpu: null, lowSince: null, query: null, ext: null };
 function notify(message, error = false) {
@@ -262,8 +266,9 @@ function syncEnabled() {
   $('box-bottom-width-label')?.toggleAttribute('hidden', !box);
   for (const name of ['girders', 'overhang'])
     form.elements[name].disabled = slab || psbox || (box && name === 'overhang');
-  $('variable-depth-fields').hidden = false;
-  form.elements.variableDepth.disabled = false;
+  // Precast NEBT girders have a constant depth: no variable-depth option.
+  $('variable-depth-fields').hidden = config.material === 'concrete';
+  form.elements.variableDepth.disabled = config.material === 'concrete';
   form.elements.pierDepth.disabled = !config.variableDepth;
   form.elements.taper.disabled = !config.variableDepth;
   form.elements.variableDepth.checked = config.variableDepth;
@@ -275,15 +280,17 @@ function syncEnabled() {
   form.elements.girders.value = config.girders;
   form.elements.wingAngle.disabled = config.abutmentType !== 'wing';
   $('wing-angle-label').hidden = config.abutmentType !== 'wing';
-  $('column-shape-label').hidden = config.pierType !== 'bent';
+  const columnPier = ['bent', 'portal'].includes(config.pierType),
+    cappedPier = columnPier || config.pierType === 'vshape';
+  $('column-shape-label').hidden = !columnPier;
   $('column-size-label').textContent =
     config.columnShape === 'square'
       ? 'Column side · m'
       : config.columnShape === 'rectangular'
         ? 'Column width · m'
         : 'Column diameter · m';
-  $('column-thickness-label').hidden = config.pierType !== 'bent' || config.columnShape !== 'rectangular';
-  $('column-spread-label').hidden = config.pierType !== 'bent' || config.columns < 2;
+  $('column-thickness-label').hidden = !columnPier || config.columnShape !== 'rectangular';
+  $('column-spread-label').hidden = !columnPier || (config.pierType === 'bent' && config.columns < 2);
   form.elements.frontSlopeDrop.disabled = !config.frontSlope;
   form.elements.lightSpacing.disabled = form.elements.lightColor.disabled = form.elements.lightSides.disabled =
     config.lighting === 'none';
@@ -303,7 +310,7 @@ function syncEnabled() {
   $('fasciaPicker').disabled = form.elements.fasciaColor.value !== 'custom';
   $('fascia-swatch').style.background = fascia;
   form.elements.columns.disabled = config.pierType !== 'bent';
-  $('bent-settings').hidden = config.pierType !== 'bent';
+  $('bent-settings').hidden = !cappedPier;
   form.elements.bentTaperStart.max = String(Math.max(0, config.width / 2 - 0.16));
   for (const name of ['frontSlope', 'frontSlopeDrop', 'frontSlopeMaterial', 'approachConeMaterial'])
     form.elements[name].disabled = config.approachWalls === 'mse';
@@ -317,9 +324,13 @@ function syncEnabled() {
   approachOptions[0].disabled = approachOptions[0].hidden = pedestrian;
   approachOptions[1].textContent = pedestrian ? 'Wheel curb + 20C railing' : 'Continue the bridge railings';
   $('columns-label').hidden = config.pierType !== 'bent';
-  $('column-diameter-label').hidden = config.pierType !== 'bent';
+  $('column-diameter-label').hidden = !columnPier;
   $('wall-settings').hidden = config.pierType !== 'wall';
   $('hammerhead-settings').hidden = config.pierType !== 'hammerhead';
+  $('portal-settings').hidden = config.pierType !== 'portal';
+  $('vshape-settings').hidden = config.pierType !== 'vshape';
+  $('hammerhead-flare-label').hidden = config.hammerheadShape !== 'flared';
+  form.elements.vAngle.disabled = !config.vCap;
   $('continuity-note').textContent =
     system === 'frame'
       ? 'Rigid frame: deck built into every support, no bearings.'
@@ -804,6 +815,15 @@ function renderSection() {
 let updateQueue = Promise.resolve();
 function update(raw, options = {}) {
   const next = validate(raw);
+  // Parameter edits rebuild immediately; only a new model (boot, concept, link, file) shows the loading logo and
+  // precompiles its shaders.
+  if (!options.heavy && !options.resetCamera) {
+    updateQueue = updateQueue.catch(() => {}).then(() => {
+      rebuild(next, options);
+      renderReflection();
+    });
+    return updateQueue;
+  }
   updateQueue = updateQueue.catch(() => {}).then(async () => {
     const loading = $('scene-loading');
     loading.hidden = false;
@@ -814,7 +834,7 @@ function update(raw, options = {}) {
       rebuild(next, options);
       await renderer.compileAsync(scene, camera);
       renderReflection();
-      renderer.render(scene, camera);
+      draw();
     } finally {
       loading.hidden = true;
       $('viewport').setAttribute('aria-busy', 'false');
@@ -1153,6 +1173,7 @@ async function boot() {
   renderer.setClearColor(0x000000, 0);
   renderer.toneMapping = T.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.12;
+  post = createPost(renderer);
   // Draw calls and triangles are counted for the whole frame: shadow, reflection and main passes.
   renderer.info.autoReset = false;
   renderer.shadowMap.autoUpdate = false;
@@ -1293,7 +1314,7 @@ async function boot() {
       if (needsRender) {
         renderer.shadowMap.needsUpdate = true;
         renderReflection();
-        renderer.render(scene, camera);
+        draw();
         needsRender = false;
         frameCount++;
       }
@@ -1355,7 +1376,7 @@ async function boot() {
         timing = $('perf-hud').hidden ? null : beginGpuTimer();
       renderer.info.reset();
       if (cameraMoved || frameCount % 2 === 0 || !reflection.texture) renderReflection();
-      renderer.render(scene, camera);
+      draw();
       timing?.end();
       frameMs = performance.now() - start;
       needsRender = false;
@@ -1592,7 +1613,7 @@ $('reset').onclick = () => selectPreset(presets[0].id);
 async function selectPreset(id) {
   const preset = presets.find(p => p.id === id);
   if (!preset) return;
-  await update(makePreset(id), { refresh: true });
+  await update(makePreset(id), { refresh: true, heavy: true });
   fit('perspective');
   $('preset').value = id;
   if (!config.name) $('sceneTitle').textContent = preset.label;
@@ -1713,7 +1734,7 @@ $('image').onclick = async () => {
     grassUniforms.grassFar.value = 400;
     reflection.setScale(1);
     renderReflection();
-    renderer.render(scene, camera);
+    draw();
     const canvas = document.createElement('canvas');
     canvas.width = renderer.domElement.width;
     canvas.height = renderer.domElement.height;
@@ -1853,7 +1874,7 @@ function registerTools() {
         )
           next = fitBoxLayout(next);
         await update(next, { refresh: true });
-        renderer.render(scene, camera);
+        draw();
         return { config: structuredClone(config), stats: window.bridgeViewer.getStats() };
       },
     },
