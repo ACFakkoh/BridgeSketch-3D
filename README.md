@@ -24,7 +24,8 @@ BridgeSketch 3D is a browser-based, interactive 3D bridge configurator. Choose a
 - **Interface:** QuickerBridge-style collapsible groups, formulas in numeric fields, a File menu with undo/redo, a modified marker and local autosave.
 - **Vehicles and birds:** clear-coat paint, contact shadows and a realistic colour mix; gull-like birds with an on/off option.
 - **Piers:** rounded, pointed or square wall ends; hammerheads with shaped shafts and heads; inclined-leg portal frames; V piers with or without a crosshead.
-- **Rendering:** light bloom, switchable with **Glow** in Balanced and High quality.
+- **Rendering:** optional light bloom (**Glow**, off by default) in Balanced and High quality.
+- **Concepts:** all seven examples revised with realistic span ratios and pier types.
 - **Editing:** parameter changes no longer show the loading logo or recompile shaders, and grass is cached between edits.
 - **Concrete:** cool grey (default) and warm pale grey; NEBT girders are fixed-depth only.
 
@@ -41,7 +42,7 @@ BridgeSketch 3D is a browser-based, interactive 3D bridge configurator. Choose a
 
 - Drag to orbit, right-drag to pan and scroll to zoom; **Fit** reframes the bridge.
 - Switch between **3D**, **Plan**, **Elevation** and **Section** views. Section views can be saved as SVG.
-- The **Time of day** slider covers 00:00–24:00; **Golden hour** jumps to 19:00.
+- The **Time of day** slider covers 00:00–24:00, with golden hour around 19:00.
 - Curated concepts sit at the top of the parameter panel. Choosing one resets every parameter.
 - **Drive** travels along the road, railway or river beneath a middle span; **Escape** returns.
 

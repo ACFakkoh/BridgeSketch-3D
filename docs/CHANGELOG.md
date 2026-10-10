@@ -12,6 +12,9 @@ Source : page Notion « BridgeSketch3D 0.6.1 update ».
 - Oiseaux : silhouettes de goélands à ailes articulées (poignet), vols battus/planés, inclinaison en virage, 6 groupes, ombrage dessus/dessous et brume ; option « Birds » (un seul appel de dessin).
 - Serveur hors ligne : en-tête `Cache-Control: no-cache` pour charger les modules à jour après une mise à jour.
 - README raccourci (deux captures).
+- Cases « Orbit » et « Golden hour » retirées de la vue (le curseur d'heure reste).
+- Bloom (« Glow ») désactivé par défaut pour tous les exemples. Correctif : la cible du bloom n'appliquait ni tone mapping ni sRGB, puis le composite appliquait ACES + sRGB à toute l'image, y compris au ciel, aux étoiles, aux oiseaux et à la météo, dont les shaders écrivent déjà des couleurs d'affichage. Le ciel était donc délavé vers le blanc. La cible est maintenant rendue comme l'écran et le bloom s'ajoute en espace d'affichage (seuil 0,82).
+- Exemples revus pour des arrangements réalistes : travées de rive ≈ 0,75–0,8 des travées intérieures ; rivière d'été 28/36/42/36/28 m sur piles-murs arrondies ; caissons acier courbes 34/46/42/30 m sur hammerheads ; arc à tirant de 45 m ; viaduc 40 + 6 × 50 + 40 m à hauteur constante ; béquilles 30/70/30 m ; arc de 100 m avec accès de 20–22 m ; passage supérieur NEBT 1600 de 2 × 36 m.
 
 ### Notes Notion du 2026-10-01 (incluses dans 0.6.1)
 

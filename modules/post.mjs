@@ -1,14 +1,17 @@
 // BridgeSketch 3D · Post-processing: physically based bloom and a light vignette, in the style of current game
 // engines (Jimenez, « Next Generation Post Processing in Call of Duty: Advanced Warfare », SIGGRAPH 2014):
 // the scene renders into a 4× MSAA half-float target, a 13-tap downsample chain (Karis-averaged with a soft
-// threshold on the first level) feeds a 3×3 tent upsample, and the final pass adds the bloom before the
-// renderer's own ACES tone mapping and sRGB output. About 1 ms on mid-range GPUs at 1080p.
+// threshold on the first level) feeds a 3×3 tent upsample, and the final pass adds the bloom. About 1 ms on
+// mid-range GPUs at 1080p.
+// The scene target is display-referred: materials apply the renderer's ACES tone mapping and sRGB output exactly as
+// on screen. The sky, stars, birds and weather are ShaderMaterials that write final display colours; tone mapping
+// them a second time in the composite washed the sky out to a pale grey-white (0.6.1 fix).
 import * as T from 'three';
 
 const vertexShader = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
 
 const downsample = new T.ShaderMaterial({
-  uniforms: { src: { value: null }, texel: { value: new T.Vector2() }, prefilter: { value: false }, threshold: { value: 1 }, knee: { value: 0.5 } },
+  uniforms: { src: { value: null }, texel: { value: new T.Vector2() }, prefilter: { value: false }, threshold: { value: 0.82 }, knee: { value: 0.12 } },
   vertexShader,
   fragmentShader: `
     uniform sampler2D src; uniform vec2 texel; uniform bool prefilter; uniform float threshold, knee;
@@ -53,6 +56,7 @@ const upsample = new T.ShaderMaterial({
 
 const composite = new T.ShaderMaterial({
   uniforms: { scene: { value: null }, bloom: { value: null }, strength: { value: 0.1 }, vignette: { value: 0.12 } },
+  toneMapped: false,
   vertexShader,
   fragmentShader: `
     uniform sampler2D scene, bloom; uniform float strength, vignette;
@@ -61,9 +65,7 @@ const composite = new T.ShaderMaterial({
       vec4 base = texture2D(scene, vUv);
       vec2 q = vUv - 0.5;
       vec3 col = (base.rgb + texture2D(bloom, vUv).rgb * strength) * (1.0 - vignette * dot(q, q) * 2.0);
-      gl_FragColor = vec4(col, base.a);
-      #include <tonemapping_fragment>
-      #include <colorspace_fragment>
+      gl_FragColor = vec4(min(col, vec3(1.0)), base.a);
     }`,
   depthTest: false,
   depthWrite: false,
@@ -89,6 +91,10 @@ export function createPost(renderer, { levels = 5 } = {}) {
     sceneTarget?.dispose();
     for (const m of mips) m.dispose();
     sceneTarget = target(size.x, size.y, 4);
+    // three.js tone-maps and encodes only the canvas and XR targets; flag this one so every material renders as on
+    // screen (half-float storage keeps the values linear-filtered, without hardware sRGB decoding).
+    sceneTarget.isXRRenderTarget = true;
+    sceneTarget.texture.colorSpace = T.SRGBColorSpace;
     mips = [];
     for (let i = 0, w = size.x, h = size.y; i < levels; i++) {
       w = Math.max(1, w >> 1);
@@ -98,7 +104,7 @@ export function createPost(renderer, { levels = 5 } = {}) {
   };
   return {
     // Strength 0 renders straight to the canvas (Performance tier, or post-processing turned off).
-    render(scene, view, { strength = 0.1, threshold = 1, vignette = 0.12 } = {}) {
+    render(scene, view, { strength = 0.1, threshold = 0.82, vignette = 0.08 } = {}) {
       if (!(strength > 0)) {
         renderer.setRenderTarget(null);
         renderer.render(scene, view);

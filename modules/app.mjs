@@ -75,7 +75,6 @@ import {
 } from './ui.mjs';
 
 // Golden hour: the sun about 7° above the horizon, 30 min before sunset.
-const GOLDEN_HOUR = 19;
 const $ = id => document.getElementById(id),
   form = $('parameters');
 let config = makePreset(presets[0].id),
@@ -594,7 +593,6 @@ function applyTimeOfDay(hour) {
   $('timeOfDay').value = hour;
   $('timeLabel').textContent =
     String(Math.floor(hour)).padStart(2, '0') + ':' + String(Math.round((hour % 1) * 60)).padStart(2, '0');
-  $('dusk').checked = golden > 0.5 && hour > 12;
   needsRender = true;
 }
 // Section view zoom: wheel zooms about the pointer, drag pans, double-click resets (like the 3D views).
@@ -1075,7 +1073,6 @@ function rebuild(raw, { resetCamera = false, refresh = false, noHistory = false,
       }
       stopDriving(false);
       controls.autoRotate = false;
-      $('tour').checked = false;
       camera.position.fromArray(position);
       controls.target.fromArray(target);
       controls.update();
@@ -1122,7 +1119,6 @@ function fit(mode = 'perspective') {
   if (mode === 'section') {
     view = mode;
     controls.autoRotate = false;
-    $('tour').checked = false;
     Object.assign(sectionZoom, { k: 1, cx: null, cy: null });
     renderSection();
     document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-pressed', b.dataset.view === mode));
@@ -1233,7 +1229,6 @@ function startDriving() {
   const saved = captureCamera();
   fit('perspective');
   controls.autoRotate = false;
-  $('tour').checked = false;
   controls.enabled = false;
   controls.enableDamping = false;
   perspectiveCamera.fov = 62;
@@ -1417,20 +1412,7 @@ async function boot() {
   };
   $('sectionStation').oninput = renderSection;
   setupSectionZoom();
-  $('dusk').onchange = () => {
-    config.timeOfDay = $('dusk').checked ? GOLDEN_HOUR : 12;
-    applyTimeOfDay(config.timeOfDay);
-  };
-  $('tour').onchange = () => {
-    stopDriving();
-    if ($('tour').checked && view !== 'perspective') fit('perspective');
-    controls.autoRotate = $('tour').checked;
-    controls.autoRotateSpeed = 0.6;
-    needsRender = true;
-  };
-  controls.autoRotate = $('tour').checked && view === 'perspective';
-  controls.autoRotateSpeed = 0.6;
-  $('tour').checked = controls.autoRotate;
+  controls.autoRotate = false;
   $('drive').onclick = startDriving;
   window.addEventListener('keydown', e => {
     if (e.key === 'Escape') stopDriving();
@@ -1749,7 +1731,6 @@ form.addEventListener('change', async e => {
 document.querySelectorAll('[data-view]').forEach(b =>
   b.addEventListener('click', () => {
     controls.autoRotate = false;
-    $('tour').checked = false;
     fit(b.dataset.view);
   }),
 );
@@ -1772,9 +1753,6 @@ async function selectPreset(id) {
   $('preset').value = id;
   if (!config.name) $('sceneTitle').textContent = preset.label;
   $('preset').title = preset.description;
-  // Orbit stays off by default (0.5.6); time keeps flowing as configured.
-  $('tour').checked = false;
-  $('tour').onchange();
   $('feedback').hidden = true;
 }
 $('preset').onchange = () => selectPreset($('preset').value);

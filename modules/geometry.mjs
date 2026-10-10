@@ -66,7 +66,7 @@ export const defaults = {
   portalBeam: false,
   vCap: true,
   hammerheadFlare: 1.5,
-  bloom: true,
+  bloom: false,
   birds: true,
   vAngle: 20,
   vArmThickness: 1,

@@ -5,16 +5,20 @@ export const presets = [
   {
     "id": "river",
     "label": "Summer river · 5 steel spans",
-    "description": "Summer evening on five variable-depth green steel spans over open ground and a river.",
+    "description": "Summer evening on five continuous variable-depth green steel spans; round-ended wall piers in the river.",
     "config": {
       ...defaults,
+      "sceneWidth": 170,
+      "wallEnds": "round",
+      "wallThickness": 1.2,
+      "pierType": "wall",
       "width": 13.2,
       "overhang": 1.3,
       "material": "steel",
-      "depth": 1.2,
+      "depth": 1.3,
       "variableDepth": true,
-      "pierDepth": 2.1,
-      "taper": 35,
+      "pierDepth": 2.2,
+      "taper": 30,
       "steelColor": "green",
       "barrierType": "steel",
       "leftRailing": "210A",
@@ -23,44 +27,40 @@ export const presets = [
       "wingAngle": 35,
       "sidewalkSide": "right",
       "sidewalkWidth": 2,
-      "bentWidth": 1.8,
-      "bentThickness": 0.9,
-      "bentEndThickness": 0.9,
-      "columnDiameter": 1.1,
-      "elevation": 6.8,
-      "approach": 24,
+      "elevation": 7.2,
+      "approach": 26,
       "seed": 24,
       "spans": [
         {
-          "length": 18,
+          "length": 28,
           "obstacle": "land",
           "width": 10,
           "elevation": 0,
           "angle": 90
         },
         {
-          "length": 20,
+          "length": 36,
           "obstacle": "water",
-          "width": 18,
+          "width": 26,
+          "elevation": 0,
+          "angle": 90
+        },
+        {
+          "length": 42,
+          "obstacle": "water",
+          "width": 26,
+          "elevation": 0,
+          "angle": 90
+        },
+        {
+          "length": 36,
+          "obstacle": "water",
+          "width": 26,
           "elevation": 0,
           "angle": 90
         },
         {
           "length": 28,
-          "obstacle": "water",
-          "width": 18,
-          "elevation": 0,
-          "angle": 90
-        },
-        {
-          "length": 20,
-          "obstacle": "water",
-          "width": 18,
-          "elevation": 0,
-          "angle": 90
-        },
-        {
-          "length": 18,
           "obstacle": "land",
           "width": 10,
           "elevation": 0,
@@ -72,16 +72,17 @@ export const presets = [
   {
     "id": "box",
     "label": "Rainy city · 4 curved boxes",
-    "description": "Four curved and skewed steel-box spans; uniform 3% crossfall, roads, railway and open ground.",
+    "description": "Four continuous curved steel-box spans on single-column hammerheads over city roads and a railway; 3 % crossfall.",
     "config": {
       ...defaults,
+      "hammerheadShape": "oblong",
       "width": 13.6,
       "overhang": 3.75,
       "girders": 2,
       "material": "box",
-      "depth": 1.3,
+      "depth": 1.7,
       "variableDepth": true,
-      "pierDepth": 2.2,
+      "pierDepth": 2.4,
       "steelColor": "blue",
       "barrierType": "steel",
       "leftRailing": "210C",
@@ -93,15 +94,15 @@ export const presets = [
       "weather": "rain",
       "pierType": "hammerhead",
       "columns": 1,
-      "columnDiameter": 1.5,
-      "hammerheadWidth": 2.5,
+      "columnDiameter": 1.8,
+      "hammerheadWidth": 2.6,
       "skew": 10,
       "curved": true,
-      "radius": 160,
-      "elevation": 7.4,
-      "approach": 25,
+      "radius": 180,
+      "elevation": 8.6,
+      "approach": 28,
       "environment": "urban",
-      "sceneWidth": 110,
+      "sceneWidth": 130,
       "timeOfDay": 14,
       "seed": 31,
       "crossfall": "right",
@@ -109,28 +110,28 @@ export const presets = [
       "concreteFinish": "light",
       "spans": [
         {
-          "length": 24,
+          "length": 34,
           "obstacle": "road",
-          "width": 10,
+          "width": 12,
           "elevation": 0,
           "angle": 80
         },
         {
-          "length": 32,
+          "length": 46,
           "obstacle": "rail",
-          "width": 7,
+          "width": 9,
           "elevation": 0,
           "angle": 90
         },
         {
-          "length": 24,
+          "length": 42,
           "obstacle": "road",
-          "width": 10,
+          "width": 12,
           "elevation": 0,
           "angle": 100
         },
         {
-          "length": 18,
+          "length": 30,
           "obstacle": "land",
           "width": 10,
           "elevation": 0,
@@ -142,14 +143,14 @@ export const presets = [
   {
     "id": "cycle",
     "label": "Night cycle arch · 1 span",
-    "description": "A narrow steel tied arch with cyclists, illuminated SDC railings, physical sky and stars.",
+    "description": "A 45 m steel tied arch for cyclists, illuminated SDC railings, physical sky and stars.",
     "config": {
       ...defaults,
       "width": 4.8,
       "overhang": 0.5,
       "girders": 2,
       "material": "steel",
-      "depth": 0.8,
+      "depth": 0.9,
       "pierDepth": 1.7,
       "steelColor": "gray16515",
       "barrierType": "steel",
@@ -165,8 +166,8 @@ export const presets = [
       "trafficMode": "cyclists",
       "elevation": 6.2,
       "rise": 0.25,
-      "approach": 18,
-      "sceneWidth": 90,
+      "approach": 20,
+      "sceneWidth": 110,
       "timeOfDay": 22.5,
       "seed": 48,
       "structureSystem": "arch",
@@ -176,9 +177,9 @@ export const presets = [
       "skyModel": "physical",
       "spans": [
         {
-          "length": 28,
+          "length": 45,
           "obstacle": "water",
-          "width": 15,
+          "width": 30,
           "elevation": 0,
           "angle": 90
         }
@@ -188,15 +189,14 @@ export const presets = [
   {
     "id": "psbox",
     "label": "Snow viaduct · 8 spans",
-    "description": "Eight prestressed twin-box spans in winter, over roads, railway, river and open ground.",
+    "description": "A curved winter viaduct: twin prestressed boxes of constant depth on 50 m spans, over roads, railways, a river and open ground.",
     "config": {
       ...defaults,
+      "wallEnds": "round",
       "width": 16.5,
       "material": "psbox",
-      "depth": 2.3,
-      "variableDepth": true,
-      "pierDepth": 4.2,
-      "taper": 32,
+      "depth": 2.8,
+      "variableDepth": false,
       "leftRailing": "311A",
       "rightRailing": "311A",
       "lighting": "poles",
@@ -204,9 +204,9 @@ export const presets = [
       "laneCount": 4,
       "weather": "snow",
       "pierType": "wall",
-      "wallThickness": 1.8,
+      "wallThickness": 2.0,
       "curved": true,
-      "radius": 520,
+      "radius": 600,
       "direction": -1,
       "elevation": 16,
       "rise": 1.1,
@@ -219,56 +219,56 @@ export const presets = [
       "concreteFinish": "light",
       "spans": [
         {
-          "length": 32,
+          "length": 40,
           "obstacle": "land",
           "width": 12,
           "elevation": 0,
           "angle": 90
         },
         {
-          "length": 40,
+          "length": 50,
           "obstacle": "road",
           "width": 12,
           "elevation": 0,
           "angle": 80
         },
         {
-          "length": 44,
+          "length": 50,
           "obstacle": "rail",
           "width": 8,
           "elevation": 0,
           "angle": 90
         },
         {
-          "length": 54,
+          "length": 50,
           "obstacle": "water",
-          "width": 34,
+          "width": 40,
           "elevation": 0,
           "angle": 90
         },
         {
-          "length": 54,
+          "length": 50,
           "obstacle": "water",
-          "width": 34,
+          "width": 40,
           "elevation": 0,
           "angle": 90
         },
         {
-          "length": 44,
+          "length": 50,
           "obstacle": "rail",
           "width": 8,
           "elevation": 0,
           "angle": 95
         },
         {
-          "length": 40,
+          "length": 50,
           "obstacle": "road",
           "width": 12,
           "elevation": 0,
           "angle": 100
         },
         {
-          "length": 32,
+          "length": 40,
           "obstacle": "land",
           "width": 12,
           "elevation": 0,
@@ -280,45 +280,45 @@ export const presets = [
   {
     "id": "strutted",
     "label": "Autumn béquilles · 3 spans",
-    "description": "Three spans on inclined legs, autumn foliage and falling leaves.",
+    "description": "A 70 m strutted frame (inclined legs) with 30 m side spans, autumn foliage and falling leaves.",
     "config": {
       ...defaults,
       "width": 12.4,
       "material": "psbox",
-      "depth": 1.5,
+      "depth": 1.8,
       "variableDepth": true,
-      "pierDepth": 3.1,
+      "pierDepth": 3.4,
       "leftRailing": "311",
       "rightRailing": "311",
       "weather": "leaves",
-      "elevation": 14,
+      "elevation": 15,
       "rise": 0.9,
       "approach": 28,
       "terrainMode": "fall",
-      "sceneWidth": 200,
+      "sceneWidth": 220,
       "timeOfDay": 16,
       "seed": 72,
       "structureSystem": "strutted",
       "concreteFinish": "light",
       "spans": [
         {
-          "length": 24,
+          "length": 30,
           "obstacle": "road",
-          "width": 7,
+          "width": 8,
           "elevation": 0,
           "angle": 90
         },
         {
-          "length": 58,
+          "length": 70,
           "obstacle": "water",
-          "width": 36,
+          "width": 48,
           "elevation": 0,
           "angle": 90
         },
         {
-          "length": 24,
+          "length": 30,
           "obstacle": "road",
-          "width": 7,
+          "width": 8,
           "elevation": 0,
           "angle": 90
         }
@@ -328,12 +328,13 @@ export const presets = [
   {
     "id": "deck-arch",
     "label": "Sunrise deck arch · 6 spans",
-    "description": "Six slab spans carried across a valley by a concrete deck arch, at sunrise.",
+    "description": "A 100 m concrete deck arch across a valley, with 20–22 m slab approach spans on wall piers, at sunrise.",
     "config": {
       ...defaults,
+      "wallEnds": "round",
       "width": 12.4,
       "material": "slab",
-      "slabDepth": 1.15,
+      "slabDepth": 1.0,
       "leftRailing": "311A",
       "rightRailing": "311A",
       "pierType": "wall",
@@ -349,28 +350,28 @@ export const presets = [
       "concreteFinish": "light",
       "spans": [
         {
-          "length": 18,
+          "length": 20,
           "obstacle": "road",
-          "width": 6,
+          "width": 7,
           "elevation": 0,
           "angle": 90
         },
         {
-          "length": 18,
+          "length": 22,
           "obstacle": "land",
           "width": 8,
           "elevation": 0,
           "angle": 90
         },
         {
-          "length": 96,
+          "length": 100,
           "obstacle": "water",
-          "width": 40,
+          "width": 44,
           "elevation": 0,
           "angle": 90
         },
         {
-          "length": 18,
+          "length": 22,
           "obstacle": "land",
           "width": 8,
           "elevation": 0,
@@ -384,9 +385,9 @@ export const presets = [
           "angle": 90
         },
         {
-          "length": 18,
+          "length": 20,
           "obstacle": "road",
-          "width": 6,
+          "width": 7,
           "elevation": 0,
           "angle": 90
         }
@@ -396,7 +397,7 @@ export const presets = [
   {
     "id": "overpass",
     "label": "TSM overpass · 2 NEBT spans",
-    "description": "Two continuous NEBT spans over a divided highway, panelled TSM approach walls, tapered caps and rain at dusk.",
+    "description": "Two continuous 36 m NEBT 1600 spans over a divided highway, three-column bent with tapered cap, TSM approach walls, rain at dusk.",
     "config": {
       ...defaults,
       "width": 12.6,
@@ -410,28 +411,28 @@ export const presets = [
       "bentEndThickness": 0.7,
       "bentTaperStart": 3,
       "columns": 3,
-      "columnDiameter": 1,
-      "elevation": 7.6,
+      "columnDiameter": 1.1,
+      "elevation": 8.2,
       "rise": 0.35,
-      "approach": 38,
+      "approach": 40,
       "approachWalls": "mse",
-      "sceneWidth": 160,
+      "sceneWidth": 170,
       "timeOfDay": 17.5,
       "seed": 118,
       "centreLine": "double",
       "concreteFinish": "light",
       "spans": [
         {
-          "length": 28,
+          "length": 36,
           "obstacle": "road",
-          "width": 11,
+          "width": 12,
           "elevation": 0,
           "angle": 90
         },
         {
-          "length": 28,
+          "length": 36,
           "obstacle": "road",
-          "width": 11,
+          "width": 12,
           "elevation": 0,
           "angle": 90
         }
