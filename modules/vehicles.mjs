@@ -10,26 +10,147 @@ export function trafficKind(index) {
   return slot === 28 ? 'double' : vehicleKinds[slot % (vehicleKinds.length - 1)];
 }
 const surface = (color, roughness = 0.5, metalness = 0) => new T.MeshStandardMaterial({ color, roughness, metalness });
+
+// Clear-coated paint (0.7.0). One MeshPhysicalMaterial program is shared by every paint colour; set to false to fall
+// back to a plain glossy MeshStandardMaterial if a very weak GPU ever struggles. Note: with scene.environment, three
+// ignores material.envMapIntensity (scene.environmentIntensity rules), so reflectivity is tuned with colour/metalness.
+const CLEARCOAT = true;
+const coat = (color, flake = 0) =>
+  CLEARCOAT
+    ? new T.MeshPhysicalMaterial({
+        color,
+        roughness: 0.42 - 0.14 * flake,
+        metalness: 0.05 + 0.4 * flake,
+        clearcoat: 0.85,
+        clearcoatRoughness: 0.07,
+      })
+    : surface(color, 0.3, 0.2 + 0.4 * flake);
+
 const finishes = {
-  paint: surface('#2e6484', 0.28, 0.32),
-  rubber: surface('#171c20', 0.92),
-  trim: surface('#414a50', 0.48, 0.28),
-  metal: surface('#b5bdc0', 0.3, 0.7),
-  glass: surface('#294959', 0.14, 0.3),
-  cargo: surface('#d8e0e1', 0.42, 0.2),
-  headlamp: surface('#f0efdf', 0.2, 0.05),
-  taillamp: surface('#9f1d18', 0.28, 0.1),
-  amber: surface('#d99c30', 0.3, 0.1),
+  paint: coat('#2a5a8c', 0.5),
+  // Tyres are almost black so the bright rims and body read against them.
+  rubber: surface('#0f1316', 0.96),
+  // Black plastic trim and bumpers.
+  trim: surface('#2a3135', 0.52, 0.12),
+  // Chrome: low roughness, high metalness → mirrors the sky environment.
+  metal: surface('#c6cdcf', 0.22, 0.8),
+  // Dark tinted privacy glass; metal-ish reflectance (≈10–15 %) gives a crisp, bluish sky reflection by day.
+  glass: surface('#4d6671', 0.05, 0.85),
+  cargo: surface('#dfe5e5', 0.46, 0.06),
+  headlamp: surface('#f4f2e4', 0.08, 0.2),
+  taillamp: surface('#a8201a', 0.2, 0.1),
+  amber: surface('#e0a233', 0.3, 0.1),
+  // Roof boxes and racks.
+  carrier: surface('#1c2225', 0.42, 0.25),
 };
+const LAMPS = { head: 0.16, tail: 0.3 };
 finishes.headlamp.emissive.set('#ffdf9d');
-finishes.headlamp.emissiveIntensity = 0.16;
+finishes.headlamp.emissiveIntensity = LAMPS.head;
 finishes.taillamp.emissive.set('#a52310');
-finishes.taillamp.emissiveIntensity = 0.15;
+finishes.taillamp.emissiveIntensity = LAMPS.tail; // brake/tail lenses keep a faint glow by day
 // Night driving (0.6.0): headlamps and tail lamps glow after dusk (emissive only: no extra lights or passes).
 export function setVehicleLights(level) {
-  finishes.headlamp.emissiveIntensity = 0.16 + 3.2 * level;
-  finishes.taillamp.emissiveIntensity = 0.15 + 2.4 * level;
+  finishes.headlamp.emissiveIntensity = LAMPS.head + 3.2 * level;
+  finishes.taillamp.emissiveIntensity = LAMPS.tail + 2.25 * level;
 }
+
+// ---- Paint palettes (0.7.0) ------------------------------------------------------------------------------------
+// Real traffic is dominated by white, black, grey and silver with a few colour accents. Each entry:
+// [hex, weight, metallic flake 0–1, trailer hex, livery-stripe hex (null = the paint colour)].
+const CAR_PALETTE = [
+  ['#e3e6e5', 24, 0.1], // white
+  ['#16191b', 15, 0.3], // black
+  ['#53595d', 12, 0.6], // graphite
+  ['#b6bcbf', 13, 0.7], // silver
+  ['#848c91', 7, 0.6], // grey
+  ['#2a5a8c', 7, 0.5], // blue
+  ['#1d2f4d', 3, 0.5], // navy
+  ['#a9262b', 6, 0.35], // red
+  ['#63202c', 2, 0.4], // burgundy
+  ['#2f5c47', 3, 0.4], // green
+  ['#c8b995', 3, 0.45], // champagne
+  ['#6b4b37', 1.5, 0.4], // brown
+  ['#d77a2b', 1.5, 0.2], // orange
+  ['#dfb83c', 1, 0.1], // yellow
+];
+const COMMERCIAL_PALETTE = [
+  ['#e8ebea', 42, 0.05, '#e8ecec', '#2b5b8f'], // white cab and trailer, blue stripe
+  ['#e8ebea', 8, 0.05, '#d3d9db', '#a9262b'], // white cab, light-grey trailer, red stripe
+  ['#b6bcbf', 8, 0.6, '#e1e6e7', '#2f5c47'], // silver cab, green stripe
+  ['#2a5a8c', 11, 0.3, '#dfe6ea', null], // blue cab, white trailer
+  ['#2a5a8c', 4, 0.3, '#2a5a8c', '#e8ebea'], // blue cab and trailer
+  ['#a9262b', 8, 0.2, '#e6e8e8', null], // red cab, white trailer
+  ['#a9262b', 3, 0.2, '#a9262b', '#e8ebea'], // red cab and trailer
+  ['#2f6b4f', 5, 0.2, '#e1e6e5', null], // green
+  ['#dfb83c', 3, 0.1, '#e6e8e8', '#16191b'], // yellow
+  ['#16191b', 3, 0.3, '#d6dcdd', '#a9262b'], // black
+  ['#d77a2b', 2, 0.1, '#e6e8e8', null], // orange
+  ['#53595d', 3, 0.6, '#cfd5d7', '#2a5a8c'], // graphite
+];
+// Cyclists wear vivid jerseys instead of car paint.
+const JERSEY_PALETTE = ['#d23b32', '#2f6fb5', '#e8c52f', '#2e9a62', '#e5e8e6', '#e0702a', '#7a4cb0', '#16191b'].map(c => [c, 1]);
+const palettes = {
+  car: CAR_PALETTE,
+  commercial: COMMERCIAL_PALETTE,
+  cyclist: JERSEY_PALETTE,
+};
+const cumulative = list => {
+  let total = 0;
+  return list.map(entry => (total += entry[1]));
+};
+const cumulativeWeights = Object.fromEntries(Object.entries(palettes).map(([k, list]) => [k, cumulative(list)]));
+const paintCache = new Map(),
+  solidCache = new Map(),
+  cargoCache = new Map();
+const solidPaint = hex => {
+  if (!solidCache.has(hex)) solidCache.set(hex, coat(hex, 0.1));
+  return solidCache.get(hex);
+};
+const cargoPaint = hex => {
+  if (!cargoCache.has(hex)) cargoCache.set(hex, surface(hex, 0.46, 0.06));
+  return cargoCache.get(hex);
+};
+
+// Deterministic 0–1 hash of an integer (and a salt), so a given scene always shows the same traffic.
+export function vehicleRandom(n, salt = 0) {
+  let h = ((Math.trunc(n) | 0) ^ Math.imul(salt + 1, 0x9e3779b1)) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+// Shared, cached paint material for a vehicle; `seed` is any integer (the same seed always gives the same colour).
+// Commercial paints also carry the matching trailer and livery-stripe materials in userData.
+export function vehiclePaint(seed, type = 'sedan') {
+  const set = type === 'cyclist' ? 'cyclist' : ['van', 'truck', 'semi', 'double'].includes(type) ? 'commercial' : 'car',
+    weights = cumulativeWeights[set],
+    r = vehicleRandom(seed, 11) * weights.at(-1);
+  const index = Math.max(
+    0,
+    weights.findIndex(w => r < w),
+  );
+  const key = `${set}${index}`;
+  if (!paintCache.has(key)) {
+    const [hex, , flake = 0, cargo, stripe] = palettes[set][index];
+    const paint = set === 'cyclist' ? surface(hex, 0.62, 0.05) : coat(hex, flake);
+    if (cargo) paint.userData.cargo = cargoPaint(cargo);
+    if (stripe) paint.userData.stripe = solidPaint(stripe);
+    paintCache.set(key, paint);
+  }
+  return paintCache.get(key);
+}
+
+// Resolves a part's material name; callers may still override any of them with `vehicle_<name>` entries.
+function resolver(paint, materials) {
+  const cargo = paint.userData.cargo ?? finishes.cargo,
+    livery = paint.userData.stripe ?? paint;
+  return name =>
+    name === 'paint'
+      ? paint
+      : (materials[`vehicle_${name}`] ??
+        (name === 'cargo' ? cargo : name === 'livery' ? livery : finishes[name]));
+}
+
 const cyclistFinishes = {
   skin: surface('#bb8865', 0.87),
   trousers: surface('#263d52', 0.88),
@@ -79,65 +200,88 @@ function modelParts(type) {
   return templates.get(type);
 }
 
+// Procedural bodies (semi trailer, double) are baked once into one merged geometry per material and shared by every
+// instance: dozens of boxes and wheels become a handful of draw calls.
+function bakeParts(build) {
+  const buckets = new Map();
+  const put = (material, geometry, x = 0, y = 0, z = 0, spin = false) => {
+    if (spin) geometry.rotateX(Math.PI / 2); // cylinders: axis Y → Z (wheels)
+    geometry.translate(x, y, z);
+    if (!buckets.has(material)) buckets.set(material, []);
+    buckets.get(material).push(geometry);
+  };
+  build(put);
+  return [...buckets].map(([material, geos]) => {
+    const geometry = mergeGeometries(geos, false);
+    geos.forEach(g => g.dispose());
+    return { material, geometry };
+  });
+}
+const baked = new Map();
+const bakedParts = (key, build) => {
+  if (!baked.has(key)) baked.set(key, bakeParts(build));
+  return baked.get(key);
+};
+// Instances share the template geometry (disposeModel skips meshes flagged sharedGeometry).
+function addPart(group, part, material, label) {
+  const mesh = new T.Mesh(part.geometry, material(part.material));
+  mesh.name = `${label} ${part.material}`;
+  mesh.castShadow = mesh.receiveShadow = true;
+  mesh.userData.sharedGeometry = true;
+  group.add(mesh);
+  return mesh;
+}
+
 // Double (train routier, 0.6.0): long-nose tractor with sleeper and two 8.2 m pup trailers joined by a converter
 // dolly; 18.0 m from the steer axle to the last axle, 4.15 m from the asphalt to the top of the trailers.
 export const DOUBLE = { length: 21.6, height: 4.15, frontAxle: 1.3, lastAxle: 19.3 };
-function createDoubleModel(group, paint, material) {
+function buildDouble(put) {
   const L = DOUBLE.length,
     x = d => L / 2 - d; // distance from the front bumper → local x (+X forward)
-  const add = (name, geometry, mat, px, py, pz) => {
-    const mesh = new T.Mesh(geometry, mat);
-    mesh.name = name;
-    mesh.position.set(px, py, pz);
-    mesh.castShadow = mesh.receiveShadow = true;
-    group.add(mesh);
-    return mesh;
-  };
-  const box = (name, mat, d0, d1, y0, y1, w, z = 0) =>
-    add(name, new T.BoxGeometry(d1 - d0, y1 - y0, w), mat, x((d0 + d1) / 2), (y0 + y1) / 2, z);
+  const box = (mat, d0, d1, y0, y1, w, z = 0) =>
+    put(mat, new T.BoxGeometry(d1 - d0, y1 - y0, w), x((d0 + d1) / 2), (y0 + y1) / 2, z);
   const wheel = (d, z, dual = false) => {
     const r = 0.52,
       t = dual ? 0.56 : 0.3;
-    const tyre = add('Tyre', new T.CylinderGeometry(r, r, t, 18), material('rubber'), x(d), r, z);
-    tyre.rotation.x = Math.PI / 2;
-    const rim = add('Wheel rim', new T.CylinderGeometry(0.3, 0.3, t + 0.01, 14), material('metal'), x(d), r, z + Math.sign(z) * 0.005);
-    rim.rotation.x = Math.PI / 2;
+    put('rubber', new T.CylinderGeometry(r, r, t, 18), x(d), r, z, true);
+    put('metal', new T.CylinderGeometry(0.3, 0.3, t + 0.01, 14), x(d), r, z + Math.sign(z) * 0.005, true);
   };
   // Tractor: bumper, long hood, cab, sleeper with roof fairing, tanks, stacks, mirrors.
-  box('Front bumper', material('metal'), 0, 0.35, 0.45, 0.85, 2.5);
-  box('Grille', material('trim'), 0.3, 0.45, 0.85, 1.95, 1.2);
-  box('Hood', paint, 0.35, 2.55, 0.95, 1.95, 2.05);
+  box('metal', 0, 0.35, 0.45, 0.85, 2.5); // front bumper
+  box('trim', 0.3, 0.45, 0.85, 1.95, 1.2); // grille
+  box('paint', 0.35, 2.55, 0.95, 1.95, 2.05); // hood
   for (const z of [-1.1, 1.1]) {
-    box('Fender', paint, 0.6, 2.2, 0.75, 1.25, 0.35, z);
-    box('Headlamp', material('headlamp'), 0.32, 0.4, 1.35, 1.55, 0.35, z * 0.8);
-    box('Fuel tank', material('metal'), 3.4, 4.9, 0.55, 1.15, 0.55, z * 1.02);
-    add('Exhaust stack', new T.CylinderGeometry(0.08, 0.08, 2.45, 8), material('metal'), x(4.55), 2.925, z * 1.05);
-    box('Mirror', material('trim'), 2.35, 2.45, 2.3, 2.75, 0.12, z * 1.35);
+    box('paint', 0.6, 2.2, 0.75, 1.25, 0.35, z); // fender
+    box('headlamp', 0.32, 0.4, 1.35, 1.55, 0.35, z * 0.8);
+    box('metal', 3.4, 4.9, 0.55, 1.15, 0.55, z * 1.02); // fuel tank
+    put('metal', new T.CylinderGeometry(0.08, 0.08, 2.45, 8), x(4.55), 2.925, z * 1.05); // exhaust stack
+    box('trim', 2.35, 2.45, 2.3, 2.75, 0.12, z * 1.35); // mirror
   }
-  box('Cab', paint, 2.55, 4.3, 0.95, 3.15, 2.45);
-  box('Windshield', material('glass'), 2.5, 2.62, 2.15, 3.0, 2.2);
-  for (const z of [-1.23, 1.23]) box('Side window', material('glass'), 2.8, 3.6, 2.15, 2.85, 0.02, z);
-  box('Sleeper', paint, 4.3, 6.0, 0.95, 3.55, 2.45);
-  box('Roof fairing', paint, 3.4, 6.0, 3.15, DOUBLE.height - 0.1, 2.3);
-  box('Chassis', material('trim'), 0.4, 7.4, 0.55, 0.85, 1.0);
-  box('Fifth wheel', material('trim'), 5.9, 7.1, 0.95, 1.12, 1.9);
+  box('paint', 2.55, 4.3, 0.95, 3.15, 2.45); // cab
+  box('glass', 2.5, 2.62, 2.15, 3.0, 2.2); // windshield
+  for (const z of [-1.23, 1.23]) box('glass', 2.8, 3.6, 2.15, 2.85, 0.02, z); // side windows
+  box('paint', 4.3, 6.0, 0.95, 3.55, 2.45); // sleeper
+  box('paint', 3.4, 6.0, 3.15, DOUBLE.height - 0.1, 2.3); // roof fairing
+  box('trim', 0.4, 7.4, 0.55, 0.85, 1.0); // chassis
+  box('trim', 5.9, 7.1, 0.95, 1.12, 1.9); // fifth wheel
   // Trailer 1 (5.2–13.4) on the fifth wheel, converter dolly with draw bar, trailer 2 (13.4–21.6).
   const trailer = (d0, d1, axle) => {
-    box('Dry-van trailer', material('cargo'), d0, d1, 1.25, DOUBLE.height, 2.6);
-    box('Trailer chassis', material('trim'), d0 + 0.1, d1 - 0.1, 1.02, 1.25, 1.9);
+    box('cargo', d0, d1, 1.25, DOUBLE.height, 2.6); // dry-van box
+    box('trim', d0 + 0.1, d1 - 0.1, 1.02, 1.25, 1.9); // chassis
     for (const z of [-1.301, 1.301]) {
-      box('Trailer livery', paint, d0 + 0.3, d1 - 0.3, 1.45, 1.6, 0.02, z);
-      for (let d = d0 + 0.8; d < d1 - 0.3; d += 1.2) box('Side marker', material('amber'), d, d + 0.1, 1.33, 1.4, 0.03, z * 1.005);
-      box('Tail lamp', material('taillamp'), d1 - 0.02, d1 + 0.01, 1.3, 1.46, 0.34, z * 0.7);
+      box('livery', d0 + 0.3, d1 - 0.3, 1.45, 1.6, 0.02, z);
+      for (let d = d0 + 0.8; d < d1 - 0.3; d += 1.2) box('amber', d, d + 0.1, 1.33, 1.4, 0.03, z * 1.005); // markers
+      box('taillamp', d1 - 0.02, d1 + 0.01, 1.3, 1.46, 0.34, z * 0.7);
       wheel(axle - 0.6, z * 0.92, true);
       wheel(axle + 0.6, z * 0.92, true);
+      box('rubber', axle + 1.14, axle + 1.16, 0.35, 0.95, 0.5, z * 0.92); // mud flap
     }
-    box('Rear door seam', material('trim'), d1 - 0.01, d1 + 0.01, 1.3, DOUBLE.height - 0.05, 0.03);
-    box('Underrun bar', material('metal'), d1 - 0.25, d1 - 0.1, 0.5, 0.66, 2.1);
+    box('trim', d1 - 0.01, d1 + 0.01, 1.3, DOUBLE.height - 0.05, 0.03); // rear door seam
+    box('metal', d1 - 0.25, d1 - 0.1, 0.5, 0.66, 2.1); // underrun bar
   };
   trailer(5.2, 13.4, 12.2);
-  box('Dolly draw bar', material('trim'), 13.4, 14.5, 0.62, 0.72, 0.25);
-  box('Dolly frame', material('trim'), 14.0, 15.3, 0.75, 1.0, 1.9);
+  box('trim', 13.4, 14.5, 0.62, 0.72, 0.25); // dolly draw bar
+  box('trim', 14.0, 15.3, 0.75, 1.0, 1.9); // dolly frame
   trailer(13.4, 21.6, DOUBLE.lastAxle - 0.6);
   for (const z of [-1.08, 1.08]) {
     wheel(DOUBLE.frontAxle, z);
@@ -147,72 +291,144 @@ function createDoubleModel(group, paint, material) {
   }
 }
 
+// Semi trailer behind the Kenney tractor (local x: the trailer runs from -6.65 to 2.05).
+function buildSemiTrailer(put) {
+  const box = (mat, x, y, z, w, h, d) => put(mat, new T.BoxGeometry(w, h, d), x, y, z);
+  box('cargo', -2.3, 2.44, 0, 8.7, 2.66, 2.52);
+  box('trim', -2.3, 1.01, 0, 8.6, 0.22, 1.94);
+  for (const side of [-1, 1]) {
+    box('metal', -2.3, 1.17, side * 1.27, 8.65, 0.1, 0.05); // lower rail
+    box('metal', -2.3, 3.73, side * 1.27, 8.65, 0.08, 0.05); // roof rail
+    box('livery', -2.3, 1.46, side * 1.268, 8.5, 0.15, 0.014);
+    for (let x = -6.45; x < 2; x += 1.05) {
+      box('metal', x, 2.46, side * 1.269, 0.015, 2.4, 0.008); // panel seam
+      box('amber', x, 1.22, side * 1.3, 0.11, 0.065, 0.025); // side marker
+    }
+    for (const x of [-5.75, -4.55]) {
+      put('rubber', new T.CylinderGeometry(0.5, 0.5, 0.28, 20), x, 0.5, side * 1.16, true);
+      put('metal', new T.CylinderGeometry(0.3, 0.3, 0.293, 16), x, 0.5, side * 1.16, true);
+      put('trim', new T.CylinderGeometry(0.11, 0.11, 0.31, 12), x, 0.5, side * 1.16, true);
+    }
+    box('rubber', -6.35, 0.38, side * 1.16, 0.02, 0.6, 0.45); // mud flap
+    box('taillamp', -6.669, 1.17, side * 0.92, 0.032, 0.16, 0.34);
+    box('metal', -6.669, 2.47, side * 0.66, 0.024, 2.2, 0.038); // door locking bar
+  }
+  box('trim', -6.657, 2.44, 0, 0.02, 2.46, 0.025); // rear door seam
+  box('metal', -6.56, 0.53, 0, 0.12, 0.16, 2.12); // underrun bar
+}
+
 export function createVehicleModel(type, paintMaterial, materials = {}) {
   if (type === 'cyclist') return createCyclistModel(paintMaterial);
   if (type === 'double') {
     const group = new T.Group(),
-      paint = paintMaterial ?? finishes.paint,
-      material = name => (name === 'paint' ? paint : (materials[`vehicle_${name}`] ?? finishes[name]));
+      material = resolver(paintMaterial ?? finishes.paint, materials);
     group.name = 'double';
     group.userData = { ...vehicleDimensions('double'), source: 'BridgeSketch 3D procedural double', units: 'metres', forwardAxis: '+X' };
-    createDoubleModel(group, paint, material);
+    for (const part of bakedParts('double', buildDouble)) addPart(group, part, material, 'double');
     return group;
   }
   if (type === 'car') type = 'sedan';
   const dimensions = vehicleDimensions(type),
     group = new T.Group(),
-    paint = paintMaterial ?? finishes.paint;
-  const material = name => (name === 'paint' ? paint : (materials[`vehicle_${name}`] ?? finishes[name]));
+    material = resolver(paintMaterial ?? finishes.paint, materials);
   group.name = type;
   group.userData = { ...dimensions, source: 'Kenney Car Kit 3.1 (CC0)', units: 'metres', forwardAxis: '+X' };
   for (const part of modelParts(type === 'semi' ? 'tractor' : type)) {
-    const mesh = new T.Mesh(part.geometry.clone(), material(part.material));
-    mesh.name = `${type} ${part.material}`;
-    mesh.castShadow = mesh.receiveShadow = true;
+    const mesh = addPart(group, part, material, type);
     if (type === 'semi') mesh.position.x = 3.9;
-    group.add(mesh);
   }
-  if (type === 'semi') {
-    const box = (name, mat, x, y, z, w, h, d) => {
-      const mesh = new T.Mesh(new T.BoxGeometry(w, h, d), mat);
-      mesh.name = name;
-      mesh.position.set(x, y, z);
-      mesh.castShadow = mesh.receiveShadow = true;
-      group.add(mesh);
-      return mesh;
-    };
-    box('Dry-van trailer', material('cargo'), -2.3, 2.44, 0, 8.7, 2.66, 2.52);
-    box('Trailer chassis', material('trim'), -2.3, 1.01, 0, 8.6, 0.22, 1.94);
-    for (const side of [-1, 1]) {
-      box('Trailer lower rail', material('metal'), -2.3, 1.17, side * 1.27, 8.65, 0.1, 0.05);
-      box('Trailer roof rail', material('metal'), -2.3, 3.73, side * 1.27, 8.65, 0.08, 0.05);
-      box('Trailer livery', paint, -2.3, 1.46, side * 1.268, 8.5, 0.15, 0.014);
-      for (let x = -6.45; x < 2; x += 1.05) {
-        box('Trailer panel seam', material('metal'), x, 2.46, side * 1.269, 0.015, 2.4, 0.008);
-        box('Side marker', material('amber'), x, 1.22, side * 1.3, 0.11, 0.065, 0.025);
-      }
-      for (const x of [-5.75, -4.55]) {
-        const tyre = new T.Mesh(new T.CylinderGeometry(0.5, 0.5, 0.28, 20), material('rubber'));
-        tyre.rotation.x = Math.PI / 2;
-        tyre.position.set(x, 0.5, side * 1.16);
-        tyre.castShadow = true;
-        group.add(tyre);
-        const rim = new T.Mesh(new T.CylinderGeometry(0.3, 0.3, 0.293, 16), material('metal'));
-        rim.rotation.x = Math.PI / 2;
-        rim.position.copy(tyre.position);
-        group.add(rim);
-        const hub = new T.Mesh(new T.CylinderGeometry(0.11, 0.11, 0.31, 12), material('trim'));
-        hub.rotation.x = Math.PI / 2;
-        hub.position.copy(tyre.position);
-        group.add(hub);
-      }
-      box('Rear tail lamp', material('taillamp'), -6.669, 1.17, side * 0.92, 0.032, 0.16, 0.34);
-      box('Rear door locking bar', material('metal'), -6.669, 2.47, side * 0.66, 0.024, 2.2, 0.038);
-    }
-    box('Rear door seam', material('trim'), -6.657, 2.44, 0, 0.02, 2.46, 0.025);
-    box('Rear underrun bar', material('metal'), -6.56, 0.53, 0, 0.12, 0.16, 2.12);
-  }
+  if (type === 'semi') for (const part of bakedParts('semi-trailer', buildSemiTrailer)) addPart(group, part, material, type);
   return group;
+}
+
+// ---- Accessories and contact shadow (0.7.0) ---------------------------------------------------------------------
+// Roof boxes (sedan, hatchback) and a ladder/pipe rack (van): shared geometry, one extra mesh on a minority of
+// vehicles. `r` is a 0–1 deterministic random; the accessory appears when r < chance.
+const ROOF = {
+  sedan: { chance: 0.16, x: -0.42, y: 1.48, kind: 'box' },
+  hatchback: { chance: 0.14, x: -0.47, y: 1.43, kind: 'box' },
+  van: { chance: 0.35, x: -0.47, y: 2.42, kind: 'rack' },
+};
+const roofGeometry = {};
+function roofParts(kind) {
+  if (roofGeometry[kind]) return roofGeometry[kind];
+  const parts = [];
+  if (kind === 'box') {
+    parts.push(new T.BoxGeometry(0.85, 0.24, 0.76).translate(0, 0.1, 0));
+    parts.push(new T.BoxGeometry(0.64, 0.06, 0.6).translate(0, 0.25, 0)); // tapered lid
+  } else {
+    for (const z of [-0.38, 0.38]) parts.push(new T.BoxGeometry(2.6, 0.05, 0.05).translate(0, 0.0, z)); // rails
+    for (const dx of [-1.1, -0.37, 0.37, 1.1]) parts.push(new T.BoxGeometry(0.05, 0.05, 0.86).translate(dx, 0.05, 0));
+    for (const z of [-0.2, 0.2]) parts.push(new T.CylinderGeometry(0.045, 0.045, 2.9, 8).rotateZ(Math.PI / 2).translate(0, 0.13, z)); // pipes
+  }
+  roofGeometry[kind] = mergeGeometries(parts, false);
+  parts.forEach(g => g.dispose());
+  return roofGeometry[kind];
+}
+export function addRoofAccessory(group, type, r) {
+  const spec = ROOF[type];
+  if (!spec || r >= spec.chance) return null;
+  const mesh = new T.Mesh(roofParts(spec.kind), finishes.carrier);
+  mesh.name = `${type} roof ${spec.kind === 'box' ? 'box' : 'rack'}`;
+  mesh.position.set(spec.x, spec.y, 0);
+  mesh.castShadow = mesh.receiveShadow = true;
+  mesh.userData.sharedGeometry = true;
+  group.add(mesh);
+  return mesh;
+}
+
+// Fake ambient-occlusion blob under each vehicle: one shared 64 px soft rounded-rectangle alpha map, shared unit
+// quad and shared material (no lights, no extra pass, one extra draw call per vehicle). It is a child of the vehicle,
+// so it follows the deck position, grade and crossfall bank exactly like the body.
+let shadowKit;
+function contactShadowKit() {
+  if (shadowKit) return shadowKit;
+  const N = 64,
+    pixels = new Uint8Array(N * N * 4);
+  for (let j = 0; j < N; j++)
+    for (let i = 0; i < N; i++) {
+      const x = ((i + 0.5) / N) * 2 - 1,
+        y = ((j + 0.5) / N) * 2 - 1,
+        d = Math.sqrt(Math.sqrt(x ** 4 + y ** 4)), // squircle distance: rounded-rectangle footprint
+        t = Math.min(1, Math.max(0, (d - 0.3) / 0.7)),
+        a = (1 - t * t * (3 - 2 * t)) ** 1.8,
+        k = (j * N + i) * 4;
+      pixels[k] = pixels[k + 1] = pixels[k + 2] = 255;
+      pixels[k + 3] = Math.round(255 * a);
+    }
+  const map = new T.DataTexture(pixels, N, N, T.RGBAFormat, T.UnsignedByteType);
+  map.magFilter = T.LinearFilter;
+  map.minFilter = T.LinearMipmapLinearFilter;
+  map.generateMipmaps = true;
+  map.needsUpdate = true;
+  shadowKit = {
+    geometry: new T.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
+    material: new T.MeshBasicMaterial({
+      color: '#07090b',
+      map,
+      transparent: true,
+      opacity: 0.6,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -4,
+    }),
+  };
+  shadowKit.material.name = 'Contact shadow';
+  return shadowKit;
+}
+export function createContactShadow(length, width) {
+  const { geometry, material } = contactShadowKit(),
+    mesh = new T.Mesh(geometry, material);
+  mesh.name = 'Contact shadow';
+  mesh.scale.set(length * 1.02 + 0.5, 1, width * 0.98 + 0.4);
+  // 4.5 cm above the vehicle origin (road surface + 2.5 cm) clears the 2–4 % crossfall under a 2 m wide quad.
+  mesh.position.set(0, 0.045, 0);
+  mesh.updateMatrix();
+  mesh.matrixAutoUpdate = false;
+  mesh.castShadow = mesh.receiveShadow = false;
+  mesh.userData.sharedGeometry = true;
+  return mesh;
 }
 
 // Low-poly road cyclist in the Kenney traffic scale. The frame, rider body and

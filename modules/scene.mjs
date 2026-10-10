@@ -1096,7 +1096,8 @@ function batchMeshes(group) {
     if (!batches.has(child.material)) batches.set(child.material, []);
     batches.get(child.material).push(g);
     group.remove(child);
-    child.geometry.dispose();
+    // Vehicle templates and contact shadows share their geometry between instances.
+    if (!child.userData.sharedGeometry) child.geometry.dispose();
   }
   for (const [mat, geos] of batches) {
     const g = mergeGeometries(geos, false);

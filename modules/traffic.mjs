@@ -1,6 +1,13 @@
 // BridgeSketch 3D · Vehicles, trains and cyclists: placement and animation.
 import * as T from 'three';
-import { createVehicleModel, vehicleDimensions } from './vehicles.mjs';
+import {
+  addRoofAccessory,
+  createContactShadow,
+  createVehicleModel,
+  vehicleDimensions,
+  vehiclePaint,
+  vehicleRandom,
+} from './vehicles.mjs';
 import { crossAt, frame, profile, totalLength, vehicleFits } from './geometry.mjs';
 
 export function vehicle(parent, m, c, s, u, type, forward = true, road) {
@@ -14,7 +21,16 @@ export function vehicle(parent, m, c, s, u, type, forward = true, road) {
     dimensions = vehicleDimensions(type);
     if (!fits(dimensions)) return;
   }
-  const group = createVehicleModel(type, m['paint' + (Math.abs(Math.floor(s * 3 + u * 7 + c.seed)) % 7)], m);
+  // Deterministic per-vehicle identity: curated paint (mostly white / black / grey / silver), small size variety,
+  // occasional roof box or rack. All geometry and materials are shared between vehicles.
+  const n = Math.floor(s * 3 + u * 7 + c.seed),
+    group = createVehicleModel(type, vehiclePaint(n, type), m);
+  if (['sedan', 'suv', 'hatchback', 'pickup', 'van'].includes(type)) {
+    const lateral = 0.99 + 0.025 * vehicleRandom(n, 2);
+    group.scale.set(lateral, 0.965 + 0.065 * vehicleRandom(n, 3), lateral);
+    addRoofAccessory(group, type, vehicleRandom(n, 4));
+  }
+  if (type !== 'train') group.add(createContactShadow(dimensions.length, dimensions.width));
   const route = {
     s,
     u,
@@ -41,14 +57,25 @@ export function vehicle(parent, m, c, s, u, type, forward = true, road) {
 
 export function positionVehicle(group, c) {
   const { s, u, forward, road, halfLength, halfWidth, verticalOffset = 0 } = group.userData.route;
+  // Bank the body onto the crossfall (about the 1.8 m axle track) so the wheels sit flush on the deck instead of
+  // floating on the low side; trains and flat carriageways stay level. Constant for a vehicle, so computed once.
+  if (group.userData.roll === undefined) {
+    const slope = road
+      ? group.userData.route.type === 'train'
+        ? 0
+        : -0.02 * Math.sign(u)
+      : (crossAt(c, u + 0.9) - crossAt(c, u - 0.9)) / 1.8;
+    group.userData.roll = -Math.atan(slope) * (forward ? 1 : -1);
+  }
   const f = road
     ? { x: road.x + road.dx * s + road.nx * u, z: road.z + road.dz * s + road.nz * u, tx: road.dx, tz: road.dz }
     : frame(c, s, u);
   // Deck vehicles ride on the crossfall; crossing-road vehicles on the 2 % crown (not trains on their ballast).
   const lift = road ? (group.userData.route.type === 'train' ? 0 : -0.02 * Math.abs(u)) : crossAt(c, u);
   group.position.set(f.x, (road ? road.elevation : profile(c, s)) + lift + 0.025 + verticalOffset, f.z);
+  group.rotation.order = 'YZX'; // yaw, then pitch (grade), then roll (crossfall) in the vehicle's own axes
   group.rotation.set(
-    0,
+    group.userData.roll,
     -Math.atan2(f.tz, f.tx) + (forward ? 0 : Math.PI),
     Math.atan(road ? 0 : (profile(c, s + 0.1) - profile(c, s - 0.1)) / 0.2) * (forward ? 1 : -1),
   );

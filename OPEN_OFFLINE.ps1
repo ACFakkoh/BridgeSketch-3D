@@ -37,7 +37,7 @@ try {
     $bytes = [IO.File]::ReadAllBytes($file)
     $extension = [IO.Path]::GetExtension($file).ToLowerInvariant()
     $contentType = if ($mime.ContainsKey($extension)) { $mime[$extension] } else { 'application/octet-stream' }
-    $response = "HTTP/1.1 200 OK`r`nContent-Type: $contentType`r`nContent-Length: $($bytes.Length)`r`nConnection: close`r`n`r`n"
+    $response = "HTTP/1.1 200 OK`r`nContent-Type: $contentType`r`nContent-Length: $($bytes.Length)`r`nCache-Control: no-cache`r`nConnection: close`r`n`r`n"
     $header = [Text.Encoding]::ASCII.GetBytes($response)
     $stream.Write($header, 0, $header.Length)
     $stream.Write($bytes, 0, $bytes.Length)

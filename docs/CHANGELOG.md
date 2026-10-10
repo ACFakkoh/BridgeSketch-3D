@@ -1,6 +1,19 @@
 # BridgeSketch 3D
 
-## Non publié — notes Notion du 2026-10-01 (en cours, voir PLAN-2026-10-01.md)
+## 0.6.1 — 2026-10-10 — Anthony Chéruel
+
+Source : page Notion « BridgeSketch3D 0.6.1 update ».
+
+- Interface façon QuickerBridge : jetons de couleur (marine, sarcelle, ambre, fond #f0f4f7), champs à libellé au-dessus avec états survol/focus/erreur, sous-sections pliables (`<details>`) toutes repliées au démarrage avec un résumé de valeur.
+- Formules dans les champs numériques (`=2*17,4`, `(12+3)/2`, `pi`, `^`), analyseur sûr sans `eval`, flèches ↑/↓ (Maj ×10), erreur affichée sous le champ sans modifier le modèle.
+- Menu Fichier : Ouvrir (Ctrl+O), Enregistrer (Ctrl+S), Annuler (Ctrl+Z), Rétablir (Ctrl+Y / Ctrl+Maj+Z) ; historique de 100 états, indicateur « • Modified », sauvegarde locale automatique avec proposition de restauration.
+- Option « Dock below » retirée. Onglet Site réorganisé : Crossings by span, Terrain, Surroundings, River, Sky & weather, Rendering ; les autres onglets sont découpés en sous-sections plus courtes.
+- Véhicules : peinture vernie (clearcoat) et palette réaliste, vitres teintées, remorques et bandes de livrée assorties, ombre de contact douce, inclinaison sur le dévers, garde-boue, coffres de toit / galeries ; géométries partagées et semi-remorques fusionnées (moins d'appels de dessin).
+- Oiseaux : silhouettes de goélands à ailes articulées (poignet), vols battus/planés, inclinaison en virage, 6 groupes, ombrage dessus/dessous et brume ; option « Birds » (un seul appel de dessin).
+- Serveur hors ligne : en-tête `Cache-Control: no-cache` pour charger les modules à jour après une mise à jour.
+- README raccourci (deux captures).
+
+### Notes Notion du 2026-10-01 (incluses dans 0.6.1)
 
 - NEBT : plus d'option de hauteur variable (masquée dans l'interface, forcée à `false` à la validation).
 - Béton : couleur d'origine retirée, libellés « Cool grey » / « Warm pale grey » sans « reference » ; gris froid par défaut pour les 7 concepts (les anciens liens `rough` passent en gris froid).

@@ -29,11 +29,9 @@
     <main class="workspace">
       <aside class="sidebar" aria-label="Bridge parameters">
         <div class="panel-heading">
-          <h2>Bridge model</h2>
+          <h2>Bridge model <span id="dirty-state" class="dirty-state"></span></h2>
           <div>
-            <button id="dock" class="text-button" aria-pressed="false" title="Move parameters to the bottom">
-              Dock below ↓</button
-            ><button id="reset" class="text-button">Reset</button>
+            <button id="reset" class="text-button" type="button" title="Back to the starting concept (Undo brings it back)">Reset</button>
           </div>
         </div>
         <label class="variant-label"
@@ -51,8 +49,53 @@
             ><select id="preset">
               <option value="custom" disabled>Custom concept</option>
             </select></label
-          ><button id="load">Open</button><button id="save" class="primary">Save</button
-          ><input id="file" type="file" accept=".json,application/json" hidden />
+          >
+          <div class="qb-menu" id="file-menu">
+            <button
+              id="file-menu-button"
+              class="menu-button"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              aria-controls="file-menu-pop"
+            >
+              <svg class="mi-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/></svg
+              ><span>File</span><span class="caret" aria-hidden="true">▾</span>
+            </button>
+            <div id="file-menu-pop" class="menu-pop" role="menu" aria-labelledby="file-menu-button">
+              <button id="load" type="button" role="menuitem">
+                <svg class="mi-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg
+                ><span class="mi-text"><b>Open</b><small>BridgeSketch configuration (.json)</small></span><kbd>Ctrl O</kbd>
+              </button>
+              <button id="save" type="button" role="menuitem">
+                <svg class="mi-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg
+                ><span class="mi-text"><b>Save</b><small>Download the configuration (.json)</small></span><kbd>Ctrl S</kbd>
+              </button>
+              <button id="undo" type="button" role="menuitem" data-action="undo" disabled>
+                <svg class="mi-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg
+                ><span class="mi-text"><b>Undo</b><small>Back to the previous state</small></span><kbd>Ctrl Z</kbd>
+              </button>
+              <button id="redo" type="button" role="menuitem" data-action="redo" disabled>
+                <svg class="mi-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg
+                ><span class="mi-text"><b>Redo</b><small>Re-apply the undone change</small></span><kbd>Ctrl Y</kbd>
+              </button>
+              <div class="menu-foot">Up to 100 steps · the session is also kept locally in this browser</div>
+            </div>
+          </div>
+          <button id="undo-quick" class="icon-button" type="button" data-action="undo" aria-label="Undo" title="Undo (Ctrl+Z)" disabled>
+            <svg class="mi-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
+          </button>
+          <button id="redo-quick" class="icon-button" type="button" data-action="redo" aria-label="Redo" title="Redo (Ctrl+Y)" disabled>
+            <svg class="mi-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg>
+          </button>
+          <input id="file" type="file" accept=".json,application/json" hidden />
+        </div>
+        <div id="restore-bar" hidden>
+          <div class="rb-text"><b>Unsaved model found</b><small id="restore-info"></small></div>
+          <div class="rb-actions">
+            <button id="restore-dismiss" class="text-button" type="button">Dismiss</button
+            ><button id="restore-apply" class="primary" type="button">Restore</button>
+          </div>
         </div>
         <div class="input-tabs" role="tablist" aria-label="Parameter categories">
           <button
@@ -107,558 +150,701 @@
             Site
           </button>
         </div>
-        <form id="parameters">
+        <form id="parameters" autocomplete="off">
           <section id="panel-model" class="parameter-panel" role="tabpanel" aria-labelledby="tab-model">
-            <div class="panel-column">
-              <h3 class="section-label">Span arrangement</h3>
-              <label>Number of spans<input id="spanCount" type="number" min="1" max="8" step="1" /></label>
-              <div id="spanLengths" class="field-grid"></div>
-              <p class="hint">Lengths are in metres. Set each crossing in the Site tab.</p>
-            </div>
-            <div class="panel-column">
-              <h3 class="section-label">Horizontal alignment</h3>
-              <label class="check"><input name="curved" type="checkbox" />Curved alignment</label>
-              <div class="field-grid">
-                <label>Radius · m<input name="radius" type="number" min="30" max="5000" step="5" /></label
-                ><label
-                  >Curve direction<select name="direction">
-                    <option value="1">Left</option>
-                    <option value="-1">Right</option>
+            <details class="input-group" data-group="model-spans">
+              <summary><span class="group-title">Spans</span><span class="group-meta" data-meta="model-spans"></span></summary>
+              <div class="group-body">
+                <label>Number of spans<input id="spanCount" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="1" max="8" step="1" /></label>
+                <div id="spanLengths" class="field-grid"></div>
+                <p class="hint">Lengths are in metres. Set each crossing in the Site tab.</p>
+              </div>
+            </details>
+            <details class="input-group" data-group="model-align">
+              <summary><span class="group-title">Horizontal alignment</span><span class="group-meta" data-meta="model-align"></span></summary>
+              <div class="group-body">
+                <label class="check"><input name="curved" type="checkbox" />Curved alignment</label>
+                <div class="field-grid">
+                  <label>Radius · m<input name="radius" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="30" max="5000" step="5" /></label
+                  ><label
+                    >Curve direction<select name="direction">
+                      <option value="1">Left</option>
+                      <option value="-1">Right</option>
+                    </select></label
+                  >
+                </div>
+              </div>
+            </details>
+            <details class="input-group" data-group="model-skew">
+              <summary><span class="group-title">Skew &amp; elevation</span><span class="group-meta" data-meta="model-skew"></span></summary>
+              <div class="group-body">
+                <div class="field-grid">
+                  <label>Support skew · °<input name="skew" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="-45" max="45" step="1" /></label
+                  ><label>Start elevation · m<input name="elevation" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="3" max="30" step="0.05" /></label>
+                </div>
+                <p class="hint">Skew is measured from square to the centreline.</p>
+              </div>
+            </details>
+            <details class="input-group" data-group="model-profile">
+              <summary><span class="group-title">Road profile</span><span class="group-meta" data-meta="model-profile"></span></summary>
+              <div class="group-body">
+                <label
+                  >Vertical profile<select name="profile">
+                    <option value="crest">Parabolic crest</option>
+                    <option value="constant">Constant grade</option>
                   </select></label
-                ><label>Support skew · °<input name="skew" type="number" min="-45" max="45" step="1" /></label
-                ><label>Start elevation · m<input name="elevation" type="number" min="3" max="30" step="0.05" /></label>
+                >
+                <div class="field-grid">
+                  <label>Crest rise · m<input name="rise" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="0" max="3" step="0.05" /></label
+                  ><label>Grade · %<input name="grade" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="-6" max="6" step="0.1" /></label>
+                </div>
+                <p class="hint">A crest keeps equal elevations at both ends.</p>
               </div>
-            </div>
-            <div class="panel-column">
-              <h3 class="section-label">Road profile</h3>
-              <label
-                >Vertical profile<select name="profile">
-                  <option value="crest">Parabolic crest</option>
-                  <option value="constant">Constant grade</option>
-                </select></label
-              >
-              <div class="field-grid">
-                <label>Crest rise · m<input name="rise" type="number" min="0" max="3" step="0.05" /></label
-                ><label>Grade · %<input name="grade" type="number" min="-6" max="6" step="0.1" /></label>
-              </div>
-              <p class="hint">Skew is measured from square to the centreline. Crest keeps equal end elevations.</p>
-            </div>
+            </details>
           </section>
           <section id="panel-deck" class="parameter-panel" role="tabpanel" aria-labelledby="tab-deck" hidden>
-            <div class="panel-column">
-              <h3 class="section-label">Road section</h3>
-              <label
-                >Bridge traffic<select name="trafficMode">
-                  <option value="vehicles">Cars & trucks</option>
-                  <option value="cyclists">Pedestrian bridge · cyclists</option>
-                </select></label
-              >
-              <div class="field-grid">
-                <label>Total deck width · m<input name="width" type="number" min="3" max="30" step="0.1" /></label
-                ><label>Traffic lanes<input name="laneCount" type="number" min="0" max="8" step="1" /></label>
-              </div>
-              <label>Lane width · m<input name="laneWidth" type="number" min="1.5" max="4.5" step="0.1" /></label>
-              <p class="hint">
-                Right-hand traffic. Cycle bridges may be 3–6 m wide with one 1.5–2 m cycle lane; 0 lanes gives a
-                pedestrian-only deck. Remaining width forms outer shoulders.
-              </p>
-              <div class="derived"><span>Outer shoulder · L / R</span><strong id="shoulders">—</strong></div>
-            </div>
-            <div class="panel-column">
-              <h3 class="section-label">Crossfall & markings</h3>
-              <label
-                >Deck crossfall<select name="crossfall">
-                  <option value="crown">Crown · 2 % each side of the center line</option>
-                  <option value="right">Uniform · falling to the right</option>
-                  <option value="left">Uniform · falling to the left</option>
-                  <option value="flat">Flat · no crossfall</option>
-                </select></label
-              >
-              <div class="field-grid">
-                <label id="cross-slope-label"
-                  >Uniform slope<select name="crossSlope">
-                    <option value="2">2 %</option>
-                    <option value="3">3 %</option>
-                    <option value="4">4 %</option>
-                  </select></label
-                ><label id="crown-offset-label"
-                  >Center line offset · m<input name="crownOffset" type="number" min="-15" max="15" step="0.05"
-                /></label>
-              </div>
-              <label
-                >Line between directions<select name="centreLine">
-                  <option value="dashed">Dashed yellow line</option>
-                  <option value="double">Solid double yellow line</option>
-                </select></label
-              >
-              <p class="hint">
-                The crown line is the profile grade line (0 = deck centreline, + to the right). Slab, barriers, girders
-                and approaches follow the crossfall; girders are set at their own level under it.
-              </p>
-            </div>
-            <div class="panel-column">
-              <h3 class="section-label">Centre median</h3>
-              <label
-                >Median type<select name="medianType">
-                  <option value="none">No median</option>
-                  <option value="barrier">Concrete barrier · 0.60 m</option>
-                  <option value="sidewalk">Raised sidewalk / island</option>
-                </select></label
-              ><label id="median-width-label"
-                >Island width · m<input name="medianWidth" type="number" min=".6" max="4" step=".1"
-              /></label>
-              <p class="hint">
-                Centred in the road after side sidewalks. Barrier height 1.10 m; island height 200 mm. At least one lane
-                per direction.
-              </p>
-            </div>
-            <div class="panel-column">
-              <h3 class="section-label">Pedestrian space</h3>
-              <label
-                >Sidewalk position<select name="sidewalkSide">
-                  <option value="none">No sidewalk</option>
-                  <option value="left">Left side</option>
-                  <option value="right">Right side</option>
-                  <option value="both">Both sides</option>
-                </select></label
-              ><label
-                >Sidewalk width · m<input name="sidewalkWidth" type="number" min="0.5" max="6" step="0.1"
-              /></label>
-              <p class="hint">200 mm raised surface. Left/right looking from bridge start to end.</p>
-            </div>
-            <div class="panel-column">
-              <h3 class="section-label">Bridge railings</h3>
-              <label
-                >Left side<select name="leftRailing">
-                  <option value="201">Concrete barrier · Type 201 · 880 mm</option>
-                  <option value="301">Concrete barrier · Type 301 · 1140 mm</option>
-                  <option value="311">Concrete barrier · Type 311 · 880 mm</option>
-                  <option value="311A">Type 311 A+B · concrete + steel rail · 1280 mm</option>
-                  <option value="210A">Steel HSS 210A · 870 mm</option>
-                  <option value="210C">Steel HSS 210C · 1400 mm</option>
-                  <option value="20C">Steel 20C · 1400 mm pickets</option>
-                  <option value="SDC">Architectural · Samuel-De Champlain · 2400 mm</option>
-                </select></label
-              ><label
-                >Right side<select name="rightRailing">
-                  <option value="201">Concrete barrier · Type 201 · 880 mm</option>
-                  <option value="301">Concrete barrier · Type 301 · 1140 mm</option>
-                  <option value="311">Concrete barrier · Type 311 · 880 mm</option>
-                  <option value="311A">Type 311 A+B · concrete + steel rail · 1280 mm</option>
-                  <option value="210A">Steel HSS 210A · 870 mm</option>
-                  <option value="210C">Steel HSS 210C · 1400 mm</option>
-                  <option value="20C">Steel 20C · 1400 mm pickets</option>
-                  <option value="SDC">Architectural · Samuel-De Champlain · 2400 mm</option>
-                </select></label
-              ><label
-                >Traffic protection at sidewalk<select name="sidewalkRailing">
-                  <option value="none">None · 35 mm battered curb</option>
-                  <option value="301">Concrete barrier · Type 301</option>
-                  <option value="210A">Steel HSS 210A</option>
-                  <option value="210C">Steel HSS 210C</option>
-                  <option value="20C">Steel 20C pickets</option>
-                </select></label
-              >
-              <label
-                >Approach barriers<select name="approachBarrier">
-                  <option value="guardrail">W-beam guardrail · semi-rigid</option>
-                  <option value="extend">Continue the bridge railings</option>
-                  <option value="none">None</option>
-                </select></label
-              >
-              <p class="hint">
-                Steel railings sit on 450 × 280 mm wheel curbs (road face 35 mm in 280 mm); posts at 3 m on one grid
-                along the bridge and approaches. The bridge railings always continue to the end of the return walls.
-                The architectural railing leans 12° outwards, white-grey. Sidewalks are
-                280 mm thick with a 1 % crossfall to the road. Pedestrian bridges continue with a wheel curb and 20C
-                railing, or nothing.
-              </p>
-            </div>
-            <div class="panel-column">
-              <h3 class="section-label">Night lighting</h3>
-              <label
-                >Bridge lighting<select name="lighting">
-                  <option value="none">None</option>
-                  <option value="poles">LED street lights · poles</option>
-                  <option value="handrail">LED under 20C / SDC handrail</option>
-                </select></label
-              ><label
-                >Spacing · m<input name="lightSpacing" type="number" min="2" max="80" step="0.5" /></label
-              ><label
-                >Sides<select name="lightSides">
-                  <option value="both">Both sides</option>
-                  <option value="left">Left side only</option>
-                  <option value="right">Right side only</option>
-                </select></label
-              ><label
-                >Light colour<select name="lightColor">
-                  <option value="white">White · 4000 K LED</option>
-                  <option value="warm">Warm yellow · 2700 K</option>
-                </select></label
-              >
-              <p class="hint">
-                Lights switch on from 20:00 to 06:30. Street lights on 10 m poles default to 30 m; handrail LEDs under the
-                top rail of 20C or SDC railings default to 3 m.
-              </p>
-            </div>
-          </section>
-          <section id="panel-structure" class="parameter-panel" role="tabpanel" aria-labelledby="tab-structure" hidden>
-            <div class="panel-column">
-              <h3 class="section-label">Superstructure</h3>
-              <label
-                >Structural system<select name="structureSystem">
-                  <option value="girder">Girder bridge · on bearings</option>
-                  <option value="frame">Rigid frame · portique, no bearings</option>
-                  <option value="strutted">Strutted frame · inclined legs (béquilles)</option>
-                  <option value="arch">Arch · deck arch or tied arch</option>
-                </select></label
-              >
-              <div id="arch-fields" class="field-grid">
+            <details class="input-group" data-group="deck-road">
+              <summary><span class="group-title">Road section</span><span class="group-meta" data-meta="deck-road"></span></summary>
+              <div class="group-body">
                 <label
-                  >Arch type<select name="archType">
-                    <option value="deck">Deck arch · spandrel columns</option>
-                    <option value="tied">Tied arch · above the deck</option>
-                  </select></label
-                ><label
-                  >Arch material<select name="archMaterial">
-                    <option value="concrete">Concrete</option>
-                    <option value="steel">Steel</option>
-                  </select></label
-                ><label>Arch span<select name="archSpan" id="archSpan"></select></label
-                ><label title="Tied arch: rise over span (deck arch: from the springings to the deck)"
-                  >Tied arch rise / span<input name="archRise" type="number" min="0.1" max="0.35" step="0.01"
-                /></label>
-              </div>
-              <div id="strut-fields" class="field-grid">
-                <label>Leg angle from vertical · °<input name="strutAngle" type="number" min="15" max="45" step="1" /></label>
-              </div>
-              <label
-                >Structure type<select name="material">
-                  <option value="concrete">Concrete · NEBT</option>
-                  <option value="steel">Steel · plate girders</option>
-                  <option value="box">Steel · box girders</option>
-                  <option value="slab">Concrete · solid slab</option>
-                  <option value="psbox">Concrete · prestressed box girder</option>
-                </select></label
-              >
-              <p id="material-note" class="hint"></p>
-              <div class="field-grid">
-                <label id="nebt-label"
-                  >NEBT depth · mm<select id="nebt">
-                    <option value="1">1000</option>
-                    <option value="1.2">1200</option>
-                    <option value="1.4">1400</option>
-                    <option value="1.6">1600</option>
-                    <option value="1.8">1800</option>
-                  </select></label
-                ><label id="steel-depth-label"
-                  >Typical depth · m<input name="depth" type="number" min="0.4" max="5" step="0.05" /></label
-                ><label id="slab-depth-label"
-                  >Typical slab depth · m<input name="slabDepth" type="number" min="0.3" max="2.5" step="0.05" /></label
-                ><label id="girder-count-label"
-                  >Girders / span<input name="girders" type="number" min="2" max="14" step="1" /></label
-                ><label id="psbox-count-label" hidden
-                  >Concrete boxes<input name="psboxCount" type="number" min="1" max="4" step="1" /></label
-                ><label id="box-count-label" hidden
-                  >Boxes / span<input id="boxCount" type="number" min="1" max="14" step="1" /></label
-                ><label id="box-bottom-width-label"
-                  >Box bottom flange · m<input
-                    name="boxBottomWidth"
-                    type="number"
-                    min="0.3"
-                    max="15"
-                    step="0.05" /></label
-                ><label>Edge overhang · m<input name="overhang" type="number" min="0.65" max="8" step="0.05" /></label
-                ><label
-                  >Slab thickness · mm<select name="deck">
-                    <option value="0.2">200</option>
-                    <option value="0.225">225</option>
-                    <option value="0.25">250</option>
+                  >Bridge traffic<select name="trafficMode">
+                    <option value="vehicles">Cars &amp; trucks</option>
+                    <option value="cyclists">Pedestrian bridge · cyclists</option>
                   </select></label
                 >
-              </div>
-              <div class="derived"><span>Centre spacing</span><strong id="spacing">—</strong></div>
-              <p class="hint">Overhang: outer girder centre to deck edge.</p>
-            </div>
-            <div class="panel-column">
-              <h3 class="section-label">Depth & continuity</h3>
-              <div id="variable-depth-fields">
-                <label class="check"><input name="variableDepth" type="checkbox" />Variable girder depth</label>
                 <div class="field-grid">
-                  <label>Support depth · m<input name="pierDepth" type="number" min="0.4" max="8" step="0.05" /></label
-                  ><label>Haunch reach · %<input name="taper" type="number" min="10" max="45" step="5" /></label>
+                  <label>Total deck width · m<input name="width" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="3" max="30" step="0.1" /></label
+                  ><label>Traffic lanes<input name="laneCount" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="0" max="8" step="1" /></label>
                 </div>
+                <label>Lane width · m<input name="laneWidth" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="1.5" max="4.5" step="0.1" /></label>
                 <p class="hint">
-                  Smooth soffit with 400 mm constant depth over bearings. Single spans deepen at abutments.
+                  Right-hand traffic. Cycle bridges may be 3–6 m wide with one 1.5–2 m cycle lane; 0 lanes gives a
+                  pedestrian-only deck. Remaining width forms outer shoulders.
                 </p>
+                <div class="derived"><span>Outer shoulder · L / R</span><strong id="shoulders">—</strong></div>
               </div>
-              <label class="check"><input name="continuous" type="checkbox" />Continuous over piers</label>
-              <p id="continuity-note" class="hint"></p>
-            </div>
-            <div class="panel-column">
-              <h3 class="section-label">Material finish</h3>
-              <label
-                >Concrete colour<select name="concreteFinish">
-                  <option value="light">Cool grey</option>
-                  <option value="warm">Warm pale grey</option>
-                </select></label
-              >
-              <div id="steel-color-controls">
+            </details>
+            <details class="input-group" data-group="deck-crossfall">
+              <summary><span class="group-title">Crossfall</span><span class="group-meta" data-meta="deck-crossfall"></span></summary>
+              <div class="group-body">
                 <label
-                  >Steel finish<select name="steelColor">
-                    <option value="brown">AMS 10045 · Brown · #5F4F4A</option>
-                    <option value="green">AMS 14109 · Green · #005F45</option>
-                    <option value="gray">AMS 16314 · Gray · #9B9F9B</option>
-                    <option value="gray16515">AMS 16515 · Light gray · #C7C9C7</option>
-                    <option value="blue15056">AMS 15056 · Blue · #253273</option>
-                    <option value="blue15065">AMS 15065 · Blue · #005686</option>
-                    <option value="red">AMS 11086 · Red · #AD2328</option>
-                    <option value="weathered">Weathered steel · #8B6047</option>
-                    <option value="custom">Custom colour</option>
+                  >Deck crossfall<select name="crossfall">
+                    <option value="crown">Crown · 2 % each side of the center line</option>
+                    <option value="right">Uniform · falling to the right</option>
+                    <option value="left">Uniform · falling to the left</option>
+                    <option value="flat">Flat · no crossfall</option>
                   </select></label
                 >
-                <div class="steel-custom">
-                  <label>Colour picker<input id="steelPicker" type="color" value="#5f4f4a" /></label
-                  ><label
-                    >Hex code<input
-                      id="steelHex"
-                      type="text"
-                      maxlength="7"
-                      spellcheck="false"
-                      pattern="#[0-9a-fA-F]{6}"
-                      value="#5F4F4A"
-                      aria-label="Girder colour hex code"
+                <div class="field-grid">
+                  <label id="cross-slope-label"
+                    >Uniform slope<select name="crossSlope">
+                      <option value="2">2 %</option>
+                      <option value="3">3 %</option>
+                      <option value="4">4 %</option>
+                    </select></label
+                  ><label id="crown-offset-label"
+                    >Center line offset · m<input name="crownOffset" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="-15" max="15" step="0.05"
                   /></label>
                 </div>
-                <div id="steel-swatch" aria-hidden="true"></div>
-                <label
-                  >Fascia (edge) girders<select name="fasciaColor">
-                    <option value="same">Same as interior girders</option>
-                    <option value="brown">AMS 10045 · Brown · #5F4F4A</option>
-                    <option value="green">AMS 14109 · Green · #005F45</option>
-                    <option value="gray">AMS 16314 · Gray · #9B9F9B</option>
-                    <option value="gray16515">AMS 16515 · Light gray · #C7C9C7</option>
-                    <option value="blue15056">AMS 15056 · Blue · #253273</option>
-                    <option value="blue15065">AMS 15065 · Blue · #005686</option>
-                    <option value="red">AMS 11086 · Red · #AD2328</option>
-                    <option value="weathered">Weathered steel · #8B6047</option>
-                    <option value="custom">Custom colour</option>
-                  </select></label
-                >
-                <div class="steel-custom">
-                  <label>Fascia colour<input id="fasciaPicker" type="color" value="#5f4f4a" /></label>
-                  <div id="fascia-swatch" class="fascia-swatch" aria-hidden="true"></div>
-                </div>
-              </div>
-              <p id="flange-note" class="hint">
-                Plate flanges 500 × 50 mm · webs and stiffeners 14 mm · cross-frames at 8 m or less, deep diaphragms at
-                supports. Steel boxes have two 500 × 50 mm top flanges and inclined side webs.
-              </p>
-              <p class="hint">
-                Girder deck: 200, 225 or 250 mm concrete slab + 65 mm asphalt on the roadway, 50 mm haunches over the top flanges. Solid
-                slab thickness uses its own depth.
-              </p>
-            </div>
-          </section>
-          <section id="panel-supports" class="parameter-panel" role="tabpanel" aria-labelledby="tab-supports" hidden>
-            <div class="panel-column">
-              <h3 class="section-label">Pier arrangement</h3>
-              <label
-                >Pier type<select name="pierType">
-                  <option value="bent">Column bent</option>
-                  <option value="wall">Pier wall</option>
-                  <option value="hammerhead">Hammerhead</option>
-                  <option value="portal">Portal frame</option>
-                  <option value="vshape">V pier</option>
-                </select></label
-              >
-              <div class="field-grid">
-                <label id="columns-label"
-                  >Columns / bent<input name="columns" type="number" min="1" max="6" step="1" /></label
-                ><label id="column-shape-label"
-                  >Column section<select name="columnShape">
-                    <option value="round">Round</option>
-                    <option value="square">Square</option>
-                    <option value="rectangular">Rectangular</option>
-                  </select></label
-                ><label id="column-diameter-label"
-                  ><span id="column-size-label">Column diameter · m</span
-                  ><input name="columnDiameter" type="number" min=".35" max="3" step=".05"
-                /></label
-                ><label id="column-thickness-label"
-                  >Column thickness · m<input name="columnThickness" type="number" min=".35" max="3" step=".05"
-                /></label
-                ><label id="column-spread-label"
-                  >Outer column spacing · m<input name="columnSpread" type="number" min="0" max="60" step=".1"
-                /></label>
-              </div>
-              <div id="bent-settings" class="field-grid">
-                <label>Taper starts at |y| · m<input name="bentTaperStart" type="number" min="0" max="30" step=".1" /></label>
-                <label>Bent cap width · m<input name="bentWidth" type="number" min=".5" max="5" step=".1" /></label
-                ><label
-                  >Bent cap thickness · m<input
-                    name="bentThickness"
-                    type="number"
-                    min=".35"
-                    max="3"
-                    step=".05" /></label
-                ><label
-                  >Cap thickness at ends · m<input name="bentEndThickness" type="number" min=".35" max="3" step=".05"
-                /></label>
                 <p class="hint">
-                  Width along the road; thickness vertically. Cap length follows the deck width. Outer column spacing is
-                  centre to centre (0 = automatic, 64 % of the deck); inner columns are equally spaced.
+                  The crown line is the profile grade line (0 = deck centreline, + to the right). Slab, barriers, girders
+                  and approaches follow the crossfall; girders are set at their own level under it.
                 </p>
               </div>
-              <div id="wall-settings" class="field-grid">
+            </details>
+            <details class="input-group" data-group="deck-median">
+              <summary><span class="group-title">Centre median &amp; line</span><span class="group-meta" data-meta="deck-median"></span></summary>
+              <div class="group-body">
                 <label
-                  >Wall thickness · m<input name="wallThickness" type="number" min="0.25" max="2" step="0.05"
-                /></label
-                ><label
-                  >Wall ends<select name="wallEnds">
-                    <option value="round">Rounded</option>
-                    <option value="pointed">Pointed (cutwater)</option>
-                    <option value="square">Square</option>
+                  >Median type<select name="medianType">
+                    <option value="none">No median</option>
+                    <option value="barrier">Concrete barrier · 0.60 m</option>
+                    <option value="sidewalk">Raised sidewalk / island</option>
+                  </select></label
+                ><label id="median-width-label"
+                  >Island width · m<input name="medianWidth" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min=".6" max="4" step=".1"
+                /></label>
+                <p class="hint">
+                  Centred in the road after side sidewalks. Barrier height 1.10 m; island height 200 mm. At least one lane
+                  per direction.
+                </p>
+                <label
+                  >Line between directions<select name="centreLine">
+                    <option value="dashed">Dashed yellow line</option>
+                    <option value="double">Solid double yellow line</option>
                   </select></label
                 >
               </div>
-              <div id="portal-settings" class="field-grid">
-                <label>Leg inclination · m inward at footing<input name="portalBatter" type="number" min="-3" max="3" step=".05" /></label
-                ><label class="check"><input name="portalBeam" type="checkbox" /> Tie beam at mid-height</label>
-              </div>
-              <div id="vshape-settings" class="field-grid">
-                <label>Arm angle from vertical · °<input name="vAngle" type="number" min="5" max="40" step="1" /></label
-                ><label>Arm thickness · m<input name="vArmThickness" type="number" min=".4" max="2.5" step=".05" /></label>
-                <label class="check"><input name="vCap" type="checkbox" /> Cap beam (off: arms carry the outer bearings)</label>
-              </div>
-              <div id="hammerhead-settings" class="field-grid">
-                <label>Stem width · m<input name="hammerheadWidth" type="number" min="1" max="8" step="0.05" /></label
-                ><label
-                  >Stem thickness · m<input name="hammerheadThickness" type="number" min="0.35" max="2" step="0.05"
-                /></label
-                ><label
-                  >Stem section<select name="hammerheadShape">
-                    <option value="rectangular">Rectangular</option>
-                    <option value="oblong">Rounded sides</option>
-                    <option value="flared">Flared (curved transition)</option>
+            </details>
+            <details class="input-group" data-group="deck-walk">
+              <summary><span class="group-title">Sidewalks</span><span class="group-meta" data-meta="deck-walk"></span></summary>
+              <div class="group-body">
+                <label
+                  >Sidewalk position<select name="sidewalkSide">
+                    <option value="none">No sidewalk</option>
+                    <option value="left">Left side</option>
+                    <option value="right">Right side</option>
+                    <option value="both">Both sides</option>
                   </select></label
                 ><label
-                  >Head depth at stem · m<input name="hammerheadCapDepth" type="number" min="0.5" max="4" step="0.05"
+                  >Sidewalk width · m<input name="sidewalkWidth" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="0.5" max="6" step="0.1"
+                /></label>
+                <label
+                  >Traffic protection at sidewalk<select name="sidewalkRailing">
+                    <option value="none">None · 35 mm battered curb</option>
+                    <option value="301">Concrete barrier · Type 301</option>
+                    <option value="210A">Steel HSS 210A</option>
+                    <option value="210C">Steel HSS 210C</option>
+                    <option value="20C">Steel 20C pickets</option>
+                  </select></label
+                >
+                <p class="hint">
+                  200 mm raised surface, 280 mm thick with a 1 % crossfall to the road. Left/right looking from bridge
+                  start to end.
+                </p>
+              </div>
+            </details>
+            <details class="input-group" data-group="deck-rail">
+              <summary><span class="group-title">Bridge railings</span><span class="group-meta" data-meta="deck-rail"></span></summary>
+              <div class="group-body">
+                <label
+                  >Left side<select name="leftRailing">
+                    <option value="201">Concrete barrier · Type 201 · 880 mm</option>
+                    <option value="301">Concrete barrier · Type 301 · 1140 mm</option>
+                    <option value="311">Concrete barrier · Type 311 · 880 mm</option>
+                    <option value="311A">Type 311 A+B · concrete + steel rail · 1280 mm</option>
+                    <option value="210A">Steel HSS 210A · 870 mm</option>
+                    <option value="210C">Steel HSS 210C · 1400 mm</option>
+                    <option value="20C">Steel 20C · 1400 mm pickets</option>
+                    <option value="SDC">Architectural · Samuel-De Champlain · 2400 mm</option>
+                  </select></label
+                ><label
+                  >Right side<select name="rightRailing">
+                    <option value="201">Concrete barrier · Type 201 · 880 mm</option>
+                    <option value="301">Concrete barrier · Type 301 · 1140 mm</option>
+                    <option value="311">Concrete barrier · Type 311 · 880 mm</option>
+                    <option value="311A">Type 311 A+B · concrete + steel rail · 1280 mm</option>
+                    <option value="210A">Steel HSS 210A · 870 mm</option>
+                    <option value="210C">Steel HSS 210C · 1400 mm</option>
+                    <option value="20C">Steel 20C · 1400 mm pickets</option>
+                    <option value="SDC">Architectural · Samuel-De Champlain · 2400 mm</option>
+                  </select></label
+                >
+                <p class="hint">
+                  Steel railings sit on 450 × 280 mm wheel curbs (road face 35 mm in 280 mm); posts at 3 m on one grid
+                  along the bridge and approaches. The bridge railings always continue to the end of the return walls.
+                  The architectural railing leans 12° outwards, white-grey.
+                </p>
+              </div>
+            </details>
+            <details class="input-group" data-group="deck-approach">
+              <summary><span class="group-title">Approach barriers</span><span class="group-meta" data-meta="deck-approach"></span></summary>
+              <div class="group-body">
+                <label
+                  >Barrier type<select name="approachBarrier">
+                    <option value="guardrail">W-beam guardrail · semi-rigid</option>
+                    <option value="extend">Continue the bridge railings</option>
+                    <option value="none">None</option>
+                  </select></label
+                >
+                <p class="hint">
+                  Pedestrian bridges continue with a wheel curb and 20C railing, or nothing.
+                </p>
+              </div>
+            </details>
+            <details class="input-group" data-group="deck-light">
+              <summary><span class="group-title">Night lighting</span><span class="group-meta" data-meta="deck-light"></span></summary>
+              <div class="group-body">
+                <label
+                  >Bridge lighting<select name="lighting">
+                    <option value="none">None</option>
+                    <option value="poles">LED street lights · poles</option>
+                    <option value="handrail">LED under 20C / SDC handrail</option>
+                  </select></label
+                >
+                <div class="field-grid">
+                  <label>Spacing · m<input name="lightSpacing" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="2" max="80" step="0.5" /></label
+                  ><label
+                    >Sides<select name="lightSides">
+                      <option value="both">Both sides</option>
+                      <option value="left">Left side only</option>
+                      <option value="right">Right side only</option>
+                    </select></label
+                  >
+                </div>
+                <label
+                  >Light colour<select name="lightColor">
+                    <option value="white">White · 4000 K LED</option>
+                    <option value="warm">Warm yellow · 2700 K</option>
+                  </select></label
+                >
+                <p class="hint">
+                  Lights switch on from 20:00 to 06:30. Street lights on 10 m poles default to 30 m; handrail LEDs under the
+                  top rail of 20C or SDC railings default to 3 m.
+                </p>
+              </div>
+            </details>
+          </section>
+          <section id="panel-structure" class="parameter-panel" role="tabpanel" aria-labelledby="tab-structure" hidden>
+            <details class="input-group" data-group="str-system">
+              <summary><span class="group-title">Structural system</span><span class="group-meta" data-meta="str-system"></span></summary>
+              <div class="group-body">
+                <label
+                  >Structural system<select name="structureSystem">
+                    <option value="girder">Girder bridge · on bearings</option>
+                    <option value="frame">Rigid frame · portique, no bearings</option>
+                    <option value="strutted">Strutted frame · inclined legs (béquilles)</option>
+                    <option value="arch">Arch · deck arch or tied arch</option>
+                  </select></label
+                >
+                <div id="arch-fields" class="field-grid">
+                  <label
+                    >Arch type<select name="archType">
+                      <option value="deck">Deck arch · spandrel columns</option>
+                      <option value="tied">Tied arch · above the deck</option>
+                    </select></label
+                  ><label
+                    >Arch material<select name="archMaterial">
+                      <option value="concrete">Concrete</option>
+                      <option value="steel">Steel</option>
+                    </select></label
+                  ><label>Arch span<select name="archSpan" id="archSpan"></select></label
+                  ><label title="Tied arch: rise over span (deck arch: from the springings to the deck)"
+                    >Tied arch rise / span<input name="archRise" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="0.1" max="0.35" step="0.01"
+                  /></label>
+                </div>
+                <div id="strut-fields" class="field-grid">
+                  <label>Leg angle from vertical · °<input name="strutAngle" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="15" max="45" step="1" /></label>
+                </div>
+              </div>
+            </details>
+            <details class="input-group" data-group="str-type">
+              <summary><span class="group-title">Girder type</span><span class="group-meta" data-meta="str-type"></span></summary>
+              <div class="group-body">
+                <label
+                  >Structure type<select name="material">
+                    <option value="concrete">Concrete · NEBT</option>
+                    <option value="steel">Steel · plate girders</option>
+                    <option value="box">Steel · box girders</option>
+                    <option value="slab">Concrete · solid slab</option>
+                    <option value="psbox">Concrete · prestressed box girder</option>
+                  </select></label
+                >
+                <p id="material-note" class="hint"></p>
+              </div>
+            </details>
+            <details class="input-group" data-group="str-dim">
+              <summary><span class="group-title">Section dimensions</span><span class="group-meta" data-meta="str-dim"></span></summary>
+              <div class="group-body">
+                <div class="field-grid">
+                  <label id="nebt-label"
+                    >NEBT depth · mm<select id="nebt">
+                      <option value="1">1000</option>
+                      <option value="1.2">1200</option>
+                      <option value="1.4">1400</option>
+                      <option value="1.6">1600</option>
+                      <option value="1.8">1800</option>
+                    </select></label
+                  ><label id="steel-depth-label"
+                    >Typical depth · m<input name="depth" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="0.4" max="5" step="0.05" /></label
+                  ><label id="slab-depth-label"
+                    >Typical slab depth · m<input name="slabDepth" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="0.3" max="2.5" step="0.05" /></label
+                  ><label id="girder-count-label"
+                    >Girders / span<input name="girders" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="2" max="14" step="1" /></label
+                  ><label id="psbox-count-label" hidden
+                    >Concrete boxes<input name="psboxCount" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="1" max="4" step="1" /></label
+                  ><label id="box-count-label" hidden
+                    >Boxes / span<input id="boxCount" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="1" max="14" step="1" /></label
+                  ><label id="box-bottom-width-label"
+                    >Box bottom flange · m<input
+                      name="boxBottomWidth"
+                      type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num
+                      min="0.3"
+                      max="15"
+                      step="0.05" /></label
+                  ><label>Edge overhang · m<input name="overhang" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="0.65" max="8" step="0.05" /></label
+                  ><label
+                    >Slab thickness · mm<select name="deck">
+                      <option value="0.2">200</option>
+                      <option value="0.225">225</option>
+                      <option value="0.25">250</option>
+                    </select></label
+                  >
+                </div>
+                <div class="derived"><span>Centre spacing</span><strong id="spacing">—</strong></div>
+                <p class="hint">
+                  Overhang: outer girder centre to deck edge. Girder deck: 200, 225 or 250 mm concrete slab + 65 mm
+                  asphalt on the roadway, 50 mm haunches over the top flanges. Solid slab thickness uses its own depth.
+                </p>
+              </div>
+            </details>
+            <details class="input-group" data-group="str-depth">
+              <summary><span class="group-title">Depth &amp; continuity</span><span class="group-meta" data-meta="str-depth"></span></summary>
+              <div class="group-body">
+                <div id="variable-depth-fields">
+                  <label class="check"><input name="variableDepth" type="checkbox" />Variable girder depth</label>
+                  <div class="field-grid">
+                    <label>Support depth · m<input name="pierDepth" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="0.4" max="8" step="0.05" /></label
+                    ><label>Haunch reach · %<input name="taper" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="10" max="45" step="5" /></label>
+                  </div>
+                  <p class="hint">
+                    Smooth soffit with 400 mm constant depth over bearings. Single spans deepen at abutments.
+                  </p>
+                </div>
+                <label class="check"><input name="continuous" type="checkbox" />Continuous over piers</label>
+                <p id="continuity-note" class="hint"></p>
+              </div>
+            </details>
+            <details class="input-group" data-group="str-conc">
+              <summary><span class="group-title">Concrete finish</span><span class="group-meta" data-meta="str-conc"></span></summary>
+              <div class="group-body">
+                <label
+                  >Concrete colour<select name="concreteFinish">
+                    <option value="light">Cool grey</option>
+                    <option value="warm">Warm pale grey</option>
+                  </select></label
+                >
+              </div>
+            </details>
+            <details id="group-steel-finish" class="input-group" data-group="str-steel">
+              <summary><span class="group-title">Steel finish</span><span class="group-meta" data-meta="str-steel"></span></summary>
+              <div class="group-body">
+                <div id="steel-color-controls">
+                  <label
+                    >Steel finish<select name="steelColor">
+                      <option value="brown">AMS 10045 · Brown · #5F4F4A</option>
+                      <option value="green">AMS 14109 · Green · #005F45</option>
+                      <option value="gray">AMS 16314 · Gray · #9B9F9B</option>
+                      <option value="gray16515">AMS 16515 · Light gray · #C7C9C7</option>
+                      <option value="blue15056">AMS 15056 · Blue · #253273</option>
+                      <option value="blue15065">AMS 15065 · Blue · #005686</option>
+                      <option value="red">AMS 11086 · Red · #AD2328</option>
+                      <option value="weathered">Weathered steel · #8B6047</option>
+                      <option value="custom">Custom colour</option>
+                    </select></label
+                  >
+                  <div class="steel-custom">
+                    <label>Colour picker<input id="steelPicker" type="color" value="#5f4f4a" /></label
+                    ><label
+                      >Hex code<input
+                        id="steelHex"
+                        type="text"
+                        maxlength="7"
+                        spellcheck="false"
+                        pattern="#[0-9a-fA-F]{6}"
+                        value="#5F4F4A"
+                        aria-label="Girder colour hex code"
+                    /></label>
+                  </div>
+                  <div id="steel-swatch" aria-hidden="true"></div>
+                  <label
+                    >Fascia (edge) girders<select name="fasciaColor">
+                      <option value="same">Same as interior girders</option>
+                      <option value="brown">AMS 10045 · Brown · #5F4F4A</option>
+                      <option value="green">AMS 14109 · Green · #005F45</option>
+                      <option value="gray">AMS 16314 · Gray · #9B9F9B</option>
+                      <option value="gray16515">AMS 16515 · Light gray · #C7C9C7</option>
+                      <option value="blue15056">AMS 15056 · Blue · #253273</option>
+                      <option value="blue15065">AMS 15065 · Blue · #005686</option>
+                      <option value="red">AMS 11086 · Red · #AD2328</option>
+                      <option value="weathered">Weathered steel · #8B6047</option>
+                      <option value="custom">Custom colour</option>
+                    </select></label
+                  >
+                  <div class="steel-custom">
+                    <label>Fascia colour<input id="fasciaPicker" type="color" value="#5f4f4a" /></label>
+                    <div id="fascia-swatch" class="fascia-swatch" aria-hidden="true"></div>
+                  </div>
+                </div>
+                <p id="flange-note" class="hint">
+                  Plate flanges 500 × 50 mm · webs and stiffeners 14 mm · cross-frames at 8 m or less, deep diaphragms at
+                  supports. Steel boxes have two 500 × 50 mm top flanges and inclined side webs.
+                </p>
+              </div>
+            </details>
+          </section>
+          <section id="panel-supports" class="parameter-panel" role="tabpanel" aria-labelledby="tab-supports" hidden>
+            <details class="input-group" data-group="sup-type">
+              <summary><span class="group-title">Pier type</span><span class="group-meta" data-meta="sup-type"></span></summary>
+              <div class="group-body">
+                <label
+                  >Pier type<select name="pierType">
+                    <option value="bent">Column bent</option>
+                    <option value="wall">Pier wall</option>
+                    <option value="hammerhead">Hammerhead</option>
+                    <option value="portal">Portal frame</option>
+                    <option value="vshape">V pier</option>
+                  </select></label
+                >
+                <p class="hint">
+                  One pier arrangement for all interior supports. Bearings 75 mm; level plinths vary with the deck
+                  profile (100 mm minimum).
+                </p>
+              </div>
+            </details>
+            <details id="group-columns" class="input-group" data-group="sup-columns">
+              <summary><span class="group-title">Columns</span><span class="group-meta" data-meta="sup-columns"></span></summary>
+              <div class="group-body">
+                <div class="field-grid">
+                  <label id="columns-label"
+                    >Columns / bent<input name="columns" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="1" max="6" step="1" /></label
+                  ><label id="column-shape-label"
+                    >Column section<select name="columnShape">
+                      <option value="round">Round</option>
+                      <option value="square">Square</option>
+                      <option value="rectangular">Rectangular</option>
+                    </select></label
+                  ><label id="column-diameter-label"
+                    ><span id="column-size-label">Column diameter · m</span
+                    ><input name="columnDiameter" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min=".35" max="3" step=".05"
+                  /></label
+                  ><label id="column-thickness-label"
+                    >Column thickness · m<input name="columnThickness" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min=".35" max="3" step=".05"
+                  /></label
+                  ><label id="column-spread-label"
+                    >Outer column spacing · m<input name="columnSpread" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="0" max="60" step=".1"
+                  /></label>
+                </div>
+                <p class="hint">Outer column spacing is centre to centre (0 = automatic, 64 % of the deck); inner columns are equally spaced.</p>
+              </div>
+            </details>
+            <details id="bent-settings" class="input-group" data-group="sup-cap">
+              <summary><span class="group-title">Pier cap</span><span class="group-meta" data-meta="sup-cap"></span></summary>
+              <div class="group-body">
+                <div class="field-grid">
+                  <label>Taper starts at |y| · m<input name="bentTaperStart" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="0" max="30" step=".1" /></label>
+                  <label>Bent cap width · m<input name="bentWidth" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min=".5" max="5" step=".1" /></label
+                  ><label
+                    >Bent cap thickness · m<input
+                      name="bentThickness"
+                      type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num
+                      min=".35"
+                      max="3"
+                      step=".05" /></label
+                  ><label
+                    >Cap thickness at ends · m<input name="bentEndThickness" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min=".35" max="3" step=".05"
+                  /></label>
+                </div>
+                <p class="hint">
+                  Width along the road; thickness vertically. Cap length follows the deck width. Taper start: 0 = outer
+                  column face.
+                </p>
+              </div>
+            </details>
+            <details id="wall-settings" class="input-group" data-group="sup-wall">
+              <summary><span class="group-title">Pier wall</span><span class="group-meta" data-meta="sup-wall"></span></summary>
+              <div class="group-body">
+                <div class="field-grid">
+                  <label
+                    >Wall thickness · m<input name="wallThickness" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="0.25" max="2" step="0.05"
+                  /></label
+                  ><label
+                    >Wall ends<select name="wallEnds">
+                      <option value="round">Rounded</option>
+                      <option value="pointed">Pointed (cutwater)</option>
+                      <option value="square">Square</option>
+                    </select></label
+                  >
+                </div>
+              </div>
+            </details>
+            <details id="portal-settings" class="input-group" data-group="sup-portal">
+              <summary><span class="group-title">Portal frame</span><span class="group-meta" data-meta="sup-portal"></span></summary>
+              <div class="group-body">
+                <div class="field-grid">
+                  <label>Leg inclination · m inward at footing<input name="portalBatter" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="-3" max="3" step=".05" /></label
+                  ><label class="check"><input name="portalBeam" type="checkbox" /> Tie beam at mid-height</label>
+                </div>
+              </div>
+            </details>
+            <details id="vshape-settings" class="input-group" data-group="sup-vshape">
+              <summary><span class="group-title">V pier</span><span class="group-meta" data-meta="sup-vshape"></span></summary>
+              <div class="group-body">
+                <div class="field-grid">
+                  <label>Arm angle from vertical · °<input name="vAngle" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="5" max="40" step="1" /></label
+                  ><label>Arm thickness · m<input name="vArmThickness" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min=".4" max="2.5" step=".05" /></label>
+                </div>
+                <label class="check"><input name="vCap" type="checkbox" /> Cap beam (off: arms carry the outer bearings)</label>
+              </div>
+            </details>
+            <details id="hammerhead-settings" class="input-group" data-group="sup-hammerhead">
+              <summary><span class="group-title">Hammerhead</span><span class="group-meta" data-meta="sup-hammerhead"></span></summary>
+              <div class="group-body">
+                <div class="field-grid">
+                  <label>Stem width · m<input name="hammerheadWidth" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="1" max="8" step="0.05" /></label
+                  ><label
+                    >Stem thickness · m<input name="hammerheadThickness" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="0.35" max="2" step="0.05"
+                  /></label
+                  ><label
+                    >Stem section<select name="hammerheadShape">
+                      <option value="rectangular">Rectangular</option>
+                      <option value="oblong">Rounded sides</option>
+                      <option value="flared">Flared (curved transition)</option>
+                    </select></label
+                  ><label
+                    >Head depth at stem · m<input name="hammerheadCapDepth" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="0.5" max="4" step="0.05"
+                  /></label
+                  ><label
+                    >Head depth at tips · m<input name="hammerheadCapEndDepth" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="0.3" max="4" step="0.05"
+                  /></label
+                  ><label id="hammerhead-flare-label"
+                    >Flare reach · m<input name="hammerheadFlare" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="0.3" max="6" step="0.1"
+                  /></label>
+                </div>
+              </div>
+            </details>
+            <details class="input-group" data-group="sup-abut">
+              <summary><span class="group-title">Abutments</span><span class="group-meta" data-meta="sup-abut"></span></summary>
+              <div class="group-body">
+                <label
+                  >Retaining walls<select name="abutmentType">
+                    <option value="return">Return walls</option>
+                    <option value="wing">Wingwalls</option>
+                  </select></label
+                ><label id="wing-angle-label"
+                  >Outward flare · °<input name="wingAngle" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="0" max="90" step="5" /></label
+                ><label class="check"><input name="girderScreens" type="checkbox" />Girder screens (cache-poutres)</label
+                ><label
+                  >Approach retaining walls<select name="approachWalls">
+                    <option value="none">Embankments</option>
+                    <option value="mse">TSM / MSE · concrete panels</option>
+                  </select></label
+                >
+              </div>
+            </details>
+            <details class="input-group" data-group="sup-slope">
+              <summary><span class="group-title">Front slope &amp; cones</span><span class="group-meta" data-meta="sup-slope"></span></summary>
+              <div class="group-body">
+                <label class="check"><input name="frontSlope" type="checkbox" />Slope in front of abutments</label
+                ><label
+                  >Slope start below seat · m<input name="frontSlopeDrop" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="0" max="15" step="0.1"
                 /></label
                 ><label
-                  >Head depth at tips · m<input name="hammerheadCapEndDepth" type="number" min="0.3" max="4" step="0.05"
-                /></label
-                ><label id="hammerhead-flare-label"
-                  >Flare reach · m<input name="hammerheadFlare" type="number" min="0.3" max="6" step="0.1"
-                /></label>
+                  >Front slope finish<select name="frontSlopeMaterial">
+                    <option value="grass">Grass</option>
+                    <option value="stone">Stone</option>
+                    <option value="concrete">Concrete</option>
+                  </select></label
+                ><label
+                  >90° approach cones<select name="approachConeMaterial">
+                    <option value="grass">Grass</option>
+                    <option value="stone">Stone facing</option>
+                  </select></label
+                >
+                <p class="hint">
+                  2H:1V embankments. Front cones can project ahead of the abutment plane; stone facing is limited to the
+                  cone segments.
+                </p>
               </div>
-              <p class="hint">One pier arrangement for all interior supports. Bearings 75 mm; level plinths vary with the deck profile (100 mm minimum). Taper start: 0 = outer column face.</p>
-            </div>
-            <div class="panel-column">
-              <h3 class="section-label">Abutments</h3>
-              <label
-                >Retaining walls<select name="abutmentType">
-                  <option value="return">Return walls</option>
-                  <option value="wing">Wingwalls</option>
-                </select></label
-              ><label id="wing-angle-label"
-                >Outward flare · °<input name="wingAngle" type="number" min="0" max="90" step="5" /></label
-              ><label class="check"><input name="girderScreens" type="checkbox" />Girder screens (cache-poutres)</label
-              ><label>Approach retaining walls<select name="approachWalls">
-                  <option value="none">Embankments</option>
-                  <option value="mse">TSM / MSE · concrete panels</option>
-                </select></label
-              ><label class="check"><input name="frontSlope" type="checkbox" />Slope in front of abutments</label
-              ><label
-                >Slope start below seat · m<input name="frontSlopeDrop" type="number" min="0" max="15" step="0.1"
-              /></label
-              ><label
-                >Front slope finish<select name="frontSlopeMaterial">
-                  <option value="grass">Grass</option>
-                  <option value="stone">Stone</option>
-                  <option value="concrete">Concrete</option>
-                </select></label
-              ><label
-                >90° approach cones<select name="approachConeMaterial">
-                  <option value="grass">Grass</option>
-                  <option value="stone">Stone facing</option>
-                </select></label
-              >
-              <p class="hint">
-                2H:1V embankments. Front cones can project ahead of the abutment plane; stone facing is limited to the
-                cone segments.
-              </p>
-            </div>
+            </details>
           </section>
           <section id="panel-site" class="parameter-panel" role="tabpanel" aria-labelledby="tab-site" hidden>
-            <div class="panel-column">
-              <h3 class="section-label">Crossing by span</h3>
-              <label>Selected span<select id="activeSpan"></select></label>
-              <div id="spanRows"></div>
-              <p class="hint">Clearance moves the crossing elevation; subsequent bridge edits recalculate it.</p>
-            </div>
-            <div class="panel-column">
-              <h3 class="section-label">Landscape</h3>
-              <label
-                >Sky<select name="skyMode">
-                  <option value="clear">Clear gradient</option>
-                  <option value="clouds">Dynamic clouds</option>
-                </select></label
-              ><label
-                >Sky model<select name="skyModel">
-                  <option value="stylised">Stylised gradient · tuned golden hour</option>
-                  <option value="physical">Physical · Preetham scattering</option>
-                </select></label
-              ><label
-                >River surface<select name="waterStyle">
-                  <option value="natural">Natural river · rippled reflections</option>
-                  <option value="glossy">Calm mirror river</option>
-                </select></label
-              ><label
-                >Render quality<select name="renderQuality">
-                  <option value="auto">Auto · from the GPU, lowered if the frame rate drops</option>
-                  <option value="performance">Performance · no water reflection</option>
-                  <option value="balanced">Balanced · half-resolution reflection</option>
-                  <option value="high">High · dense meadow, sharp reflection</option>
-                </select></label
-              ><label class="check"><input name="bloom" type="checkbox" /> Glow (bloom) · Balanced and High</label
-              ><label
-                >Weather<select name="weather">
-                  <option value="clear">Clear</option>
-                  <option value="rain">Light rain</option>
-                  <option value="snow">Light snow</option>
-                  <option value="leaves">Falling leaves · light breeze</option>
-                </select></label
-              ><label class="check"><input name="fog" type="checkbox" />Atmospheric haze · tinted by the hour</label
-              ><label
-                >Terrain cover<select name="terrainMode">
-                  <option value="grass">Summer meadow</option>
-                  <option value="fall">Autumn · fall colours</option>
-                  <option value="snow">Winter snow</option>
-                </select></label
-              ><label
-                >Terrain shape<select name="terrainShape">
-                  <option value="natural">Natural valley · approach embankments</option>
-                  <option value="profile">Follows the road profile · cut valley</option>
-                </select></label
-              ><label
-                >Surroundings<select name="environment">
-                  <option value="rural">Rural · vegetation</option>
-                  <option value="urban">Urban · buildings, no trees</option>
-                  <option value="none">Open landscape</option>
-                </select></label
-              >
-              <div class="field-grid">
-                <label>Approach length · m<input name="approach" type="number" min="5" max="200" step="1" /></label
-                ><label>Terrain width · m<input name="sceneWidth" type="number" min="90" max="600" step="10" /></label
-                ><label>Scenery seed<input name="seed" type="number" min="0" max="99999" step="1" /></label>
+            <details class="input-group" data-group="site-cross">
+              <summary><span class="group-title">Crossings by span</span><span class="group-meta" data-meta="site-cross"></span></summary>
+              <div class="group-body">
+                <label>Selected span<select id="activeSpan"></select></label>
+                <div id="spanRows"></div>
+                <p class="hint">Clearance moves the crossing elevation; subsequent bridge edits recalculate it.</p>
               </div>
-              <p class="hint">
-                Terrain width is measured across the scene (140 m by default; curved approaches may need more). 2H:1V
-                embankments with quarter-cone ends. Trees and buildings stay outside the bridge corridor and the area
-                between crossing roads or railways.
-              </p>
-            </div>
+            </details>
+            <details class="input-group" data-group="site-terrain">
+              <summary><span class="group-title">Terrain</span><span class="group-meta" data-meta="site-terrain"></span></summary>
+              <div class="group-body">
+                <label
+                  >Terrain shape<select name="terrainShape">
+                    <option value="natural">Natural valley</option>
+                    <option value="profile">Follows the road profile</option>
+                  </select></label
+                ><label
+                  >Terrain cover<select name="terrainMode">
+                    <option value="grass">Summer meadow</option>
+                    <option value="fall">Autumn · fall colours</option>
+                    <option value="snow">Winter snow</option>
+                  </select></label
+                >
+                <div class="field-grid">
+                  <label>Approach length · m<input name="approach" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="5" max="200" step="1" /></label
+                  ><label>Terrain width · m<input name="sceneWidth" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="90" max="600" step="10" /></label>
+                </div>
+                <p class="hint">
+                  Natural valley: approach embankments. Follows the road profile: a cut valley. Terrain width is
+                  measured across the scene (140 m by default; curved approaches may need more). 2H:1V embankments with
+                  quarter-cone ends.
+                </p>
+              </div>
+            </details>
+            <details class="input-group" data-group="site-env">
+              <summary><span class="group-title">Surroundings</span><span class="group-meta" data-meta="site-env"></span></summary>
+              <div class="group-body">
+                <label
+                  >Setting<select name="environment">
+                    <option value="rural">Rural · vegetation</option>
+                    <option value="urban">Urban · buildings, no trees</option>
+                    <option value="none">Open landscape</option>
+                  </select></label
+                ><label>Scenery seed<input name="seed" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-num min="0" max="99999" step="1" /></label>
+                <p class="hint">
+                  Trees and buildings stay outside the bridge corridor and the area between crossing roads or railways.
+                  Change the seed for another layout.
+                </p>
+              </div>
+            </details>
+            <details class="input-group" data-group="site-river">
+              <summary><span class="group-title">River</span><span class="group-meta" data-meta="site-river"></span></summary>
+              <div class="group-body">
+                <label
+                  >River surface<select name="waterStyle">
+                    <option value="natural">Natural · rippled reflections</option>
+                    <option value="glossy">Calm mirror</option>
+                  </select></label
+                >
+              </div>
+            </details>
+            <details class="input-group" data-group="site-sky">
+              <summary><span class="group-title">Sky &amp; weather</span><span class="group-meta" data-meta="site-sky"></span></summary>
+              <div class="group-body">
+                <label
+                  >Sky<select name="skyMode">
+                    <option value="clear">Clear gradient</option>
+                    <option value="clouds">Dynamic clouds</option>
+                  </select></label
+                ><label
+                  >Sky model<select name="skyModel">
+                    <option value="stylised">Stylised gradient</option>
+                    <option value="physical">Physical · Preetham scattering</option>
+                  </select></label
+                ><label
+                  >Weather<select name="weather">
+                    <option value="clear">Clear</option>
+                    <option value="rain">Light rain</option>
+                    <option value="snow">Light snow</option>
+                    <option value="leaves">Falling leaves · light breeze</option>
+                  </select></label
+                ><label class="check"><input name="fog" type="checkbox" />Atmospheric haze</label
+                ><label class="check"><input name="birds" type="checkbox" />Birds · flock by day</label>
+                <p class="hint">
+                  Stylised gradient is tuned for golden hour. Haze is tinted by the hour; rain and snow always add fog.
+                </p>
+              </div>
+            </details>
+            <details class="input-group" data-group="site-render">
+              <summary><span class="group-title">Rendering</span><span class="group-meta" data-meta="site-render"></span></summary>
+              <div class="group-body">
+                <label
+                  >Render quality<select name="renderQuality">
+                    <option value="auto">Auto</option>
+                    <option value="performance">Performance</option>
+                    <option value="balanced">Balanced</option>
+                    <option value="high">High</option>
+                  </select></label
+                ><label class="check"><input name="bloom" type="checkbox" />Glow (bloom)</label>
+                <p class="hint">
+                  Auto picks from the GPU and lowers itself if the frame rate drops. Performance: no water reflection.
+                  Balanced: half-resolution reflection. High: dense meadow, sharp reflection. Glow applies to Balanced
+                  and High.
+                </p>
+              </div>
+            </details>
           </section>
         </form>
         <footer class="input-footer">Metres unless shown otherwise · concept geometry</footer>
@@ -742,6 +928,15 @@
         <p class="hint">
           Starfield and grass species adapted from CK42BB/procedural-stars-threejs and procedural-grass-threejs (MIT);
           physical sky after Tw1ddle/Sky-Shader and the three.js Sky object (MIT).
+        </p>
+        <h3>Version 0.6.1</h3>
+        <p>
+          New pier shapes (rounded or pointed wall ends, flared hammerheads, inclined portals, V piers), a light bloom,
+          faster parameter edits, clear-coat vehicles with contact shadows and a realistic paint mix, and gull-like
+          birds. Folded parameter groups with a value summary, a reorganised Site tab, formulas in the numeric fields (for
+          example <code>=2*17.4</code> or <code>(12+3)/2</code>), a File menu with Open, Save, Undo and Redo
+          (Ctrl+O, Ctrl+S, Ctrl+Z, Ctrl+Y), a modified marker, a local autosave with a restore offer, and an option to
+          turn the birds off.
         </p>
         <h3>Version 0.6.0</h3>
         <p>

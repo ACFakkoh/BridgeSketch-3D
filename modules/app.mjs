@@ -60,6 +60,19 @@ import { grassUniforms } from './grass.mjs';
 import { createPost } from './post.mjs';
 import { cloudShadow, concreteFinishes } from './materials.mjs';
 import { renderSettings, effectiveQuality, setGpuName, stepDownAuto, gpuInfo } from './quality.mjs';
+import { createHistory } from './history.mjs';
+import {
+  isNum,
+  numValue,
+  setNum,
+  numInput,
+  setupNumericInputs,
+  setupMenus,
+  setupShortcuts,
+  showDirty,
+  showRestoreBar,
+  hideRestoreBar,
+} from './ui.mjs';
 
 // Golden hour: the sun about 7° above the horizon, 30 min before sunset.
 const GOLDEN_HOUR = 19;
@@ -119,6 +132,29 @@ function notify(message, error = false) {
   $('feedback').hidden = false;
   if (!error) messageTimer = setTimeout(() => ($('feedback').hidden = true), 5000);
 }
+// Undo / redo / dirty tracking / autosave (history.mjs). Snapshots exclude the clock (time of day, time flow).
+const hist = createHistory({
+  read: () => config,
+  apply: snapshot =>
+    update({ ...snapshot, timeOfDay: config.timeOfDay, timeFlow: config.timeFlow }, { refresh: true, noHistory: true }),
+  extra: () => ({ camera: camera && controls ? captureCamera() : undefined }),
+  onState: ({ dirty, canUndo, canRedo }) => {
+    for (const b of document.querySelectorAll('[data-action="undo"]')) b.disabled = !canUndo;
+    for (const b of document.querySelectorAll('[data-action="redo"]')) b.disabled = !canRedo;
+    showDirty(dirty, config?.name);
+  },
+  onDecline: hideRestoreBar,
+  version: release.version,
+});
+async function stepHistory(dir) {
+  if (!model) return;
+  try {
+    const done = await (dir < 0 ? hist.undo() : hist.redo());
+    notify(done ? (dir < 0 ? 'Change undone.' : 'Change redone.') : dir < 0 ? 'Nothing to undo.' : 'Nothing to redo.');
+  } catch (e) {
+    notify(`${e.message} The last valid model remains visible.`, true);
+  }
+}
 let activeSpan = 0;
 function selectSpan() {
   activeSpan = Number($('activeSpan').value) || 0;
@@ -163,35 +199,58 @@ function initWorkspace() {
       }
     };
   });
-  $('dock').onclick = () => {
-    const bottom = document.body.classList.toggle('dock-bottom');
-    $('dock').textContent = bottom ? 'Dock left ←' : 'Dock below ↓';
-    $('dock').setAttribute('aria-pressed', bottom);
-  };
   $('focus').onclick = () => {
     const focus = document.body.classList.toggle('focus-mode');
     $('focus').setAttribute('aria-pressed', focus);
     $('focus').textContent = focus ? 'Parameters' : 'Focus';
   };
   $('activeSpan').onchange = selectSpan;
+  // Formula-capable numeric fields, File menu, keyboard shortcuts and the undo / redo buttons.
+  setupNumericInputs(form, {
+    onInvalid: (el, message) => {
+      const label = el.closest('label')?.textContent.replace(/\s+/g, ' ').trim();
+      notify(`${label ? label + ': ' : ''}${message}`, true);
+    },
+  });
+  setupMenus();
+  setupShortcuts({
+    save: () => $('save').click(),
+    open: () => $('load').click(),
+    undo: () => stepHistory(-1),
+    redo: () => stepHistory(1),
+    ready: () => !!model,
+  });
+  document.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => stepHistory(b.dataset.action === 'redo' ? 1 : -1)));
+  window.addEventListener('beforeunload', e => {
+    if (hist.isDirty()) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
 }
 function refreshForm() {
   const crossingOpen = [...$('spanRows').children].map(row => row.querySelector('details').open);
+  // The generated crossing fields are rebuilt below: put the focus back on the one being edited.
+  const active = document.activeElement,
+    activeKey =
+      active?.dataset?.span !== undefined && $('parameters').contains(active)
+        ? `[data-span="${active.dataset.span}"][data-key="${active.dataset.key}"]`
+        : null;
   $('archSpan').innerHTML =
     `<option value="-1">Longest span (${archSpanIndex({ ...config, archSpan: -1 }) + 1})</option>` +
     config.spans.map((span, i) => `<option value="${i}">Span ${i + 1} · ${span.length} m</option>`).join('');
   for (const el of form.elements) {
     if (!el.name) continue;
     if (el.type === 'checkbox') el.checked = config[el.name];
-    else if (config[el.name] !== undefined) el.value = config[el.name];
+    else if (config[el.name] !== undefined) isNum(el) ? setNum(el, config[el.name]) : (el.value = config[el.name]);
   }
-  $('spanCount').value = config.spans.length;
+  setNum($('spanCount'), config.spans.length);
   $('nebt').value = config.depth;
   $('variantName').value = config.name ?? '';
   $('spanLengths').innerHTML = config.spans
     .map(
       (span, i) =>
-        `<label>Span ${i + 1} · m<input data-span="${i}" data-key="length" type="number" min="10" max="150" step="1" value="${span.length}"></label>`,
+        `<label>Span ${i + 1} · m${numInput({ span: i, key: 'length', min: 10, max: 150, step: 1, value: span.length })}</label>`,
     )
     .join('');
   activeSpan = Math.min(activeSpan, config.spans.length - 1);
@@ -202,28 +261,29 @@ function refreshForm() {
   $('spanRows').innerHTML = config.spans
     .map(
       (span, i) =>
-        `<section class="span-row" ${i === activeSpan ? '' : 'hidden'}><h3>SPAN ${i + 1}</h3><label>Crossing<select data-span="${i}" data-key="obstacle">${['water', 'road', 'rail', 'land'].map(v => `<option value="${v}" ${span.obstacle === v ? 'selected' : ''}>${{ water: 'Water', road: 'Road', rail: 'Railway', land: 'Open ground · no crossing' }[v]}</option>`).join('')}</select></label><label>Vertical clearance · m<input data-span="${i}" data-key="clearance" type="number" min=".3" max="35" step=".01" value="${clearance(config, i).toFixed(2)}"></label><details ${crossingOpen[i] ? 'open' : ''}><summary>Crossing dimensions</summary><div class="field-grid">${[
+        `<section class="span-row" ${i === activeSpan ? '' : 'hidden'}><h3>SPAN ${i + 1}</h3><label>Crossing<select data-span="${i}" data-key="obstacle">${['water', 'road', 'rail', 'land'].map(v => `<option value="${v}" ${span.obstacle === v ? 'selected' : ''}>${{ water: 'Water', road: 'Road', rail: 'Railway', land: 'Open ground · no crossing' }[v]}</option>`).join('')}</select></label><label>Vertical clearance · m${numInput({ span: i, key: 'clearance', min: '.3', max: 35, step: '.01', value: clearance(config, i).toFixed(2) })}</label><details ${crossingOpen[i] ? 'open' : ''}><summary>Crossing dimensions</summary><div class="field-grid">${[
           ['width', 'Width · m', 3, 60],
           ['elevation', 'Elevation · m', -5, 15],
           ['angle', 'Crossing angle · °', 35, 145],
         ]
           .map(
             ([key, label, min, max]) =>
-              `<label>${label}<input data-span="${i}" data-key="${key}" type="number" min="${min}" max="${max}" step="any" value="${span[key]}"></label>`,
+              `<label>${label}${numInput({ span: i, key, min, max, step: 'any', value: span[key] })}</label>`,
           )
           .join('')}</div></details></section>`,
     )
     .join('');
   syncWaterFields();
   syncEnabled();
+  if (activeKey) form.querySelector(activeKey)?.focus({ preventScroll: true });
 }
 function syncWaterFields() {
   config.spans.forEach((span, i) => {
     const row = $('spanRows').children[i];
     if (!row) return;
     row.querySelector('.river-hint')?.remove();
-    row.querySelector('[data-key="clearance"]').value = clearance(config, i).toFixed(2);
-    row.querySelector('[data-key="elevation"]').value = Number(span.elevation.toFixed(4));
+    setNum(row.querySelector('[data-key="clearance"]'), clearance(config, i).toFixed(2));
+    setNum(row.querySelector('[data-key="elevation"]'), Number(span.elevation.toFixed(4)));
     const joined =
       span.obstacle === 'water' &&
       (config.spans[i - 1]?.obstacle === 'water' || config.spans[i + 1]?.obstacle === 'water');
@@ -262,6 +322,7 @@ function syncEnabled() {
   $('steel-depth-label').hidden = !steel && !psbox;
   $('slab-depth-label').hidden = !slab;
   $('steel-color-controls').hidden = !steel;
+  $('group-steel-finish').hidden = !steel;
   $('flange-note').hidden = !steel;
   $('box-bottom-width-label')?.toggleAttribute('hidden', !box);
   for (const name of ['girders', 'overhang'])
@@ -276,12 +337,13 @@ function syncEnabled() {
   $('girder-count-label').hidden = box || slab || psbox;
   $('psbox-count-label').hidden = !psbox;
   $('box-count-label').hidden = !box;
-  $('boxCount').value = config.girders;
-  form.elements.girders.value = config.girders;
+  setNum($('boxCount'), config.girders);
+  setNum(form.elements.girders, config.girders);
   form.elements.wingAngle.disabled = config.abutmentType !== 'wing';
   $('wing-angle-label').hidden = config.abutmentType !== 'wing';
   const columnPier = ['bent', 'portal'].includes(config.pierType),
     cappedPier = columnPier || config.pierType === 'vshape';
+  $('group-columns').hidden = !columnPier;
   $('column-shape-label').hidden = !columnPier;
   $('column-size-label').textContent =
     config.columnShape === 'square'
@@ -370,7 +432,70 @@ function syncEnabled() {
     Math.abs(layout.leftShoulder - layout.rightShoulder) < 0.001
       ? layout.leftShoulder.toFixed(2) + ' m'
       : layout.leftShoulder.toFixed(2) + ' / ' + layout.rightShoulder.toFixed(2) + ' m';
+  try {
+    updateGroupMeta();
+  } catch (e) {
+    console.warn(e);
+  }
 }
+// One-line value summaries shown on the folded parameter groups.
+function updateGroupMeta() {
+  const label = (name, value = config[name]) => {
+      const option = [...(form.elements[name]?.options ?? [])].find(o => o.value === String(value));
+      return option ? option.textContent.split(' · ')[0].trim() : String(value);
+    },
+    steelName = () => {
+      const option = form.elements.steelColor?.selectedOptions[0];
+      return option ? (option.textContent.split(' · ').filter(part => !part.startsWith('#')).pop() ?? '') : '';
+    },
+    c = config,
+    count = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`,
+    kinds = ['water', 'road', 'rail', 'land']
+      .map(k => [k, c.spans.filter(span => span.obstacle === k).length])
+      .filter(([, n]) => n)
+      .map(([k, n]) => `${n} ${k === 'land' ? 'open' : k}`)
+      .join(' · ');
+  const meta = {
+    'model-spans': `${count(c.spans.length, 'span')} · ${totalLength(c).toFixed(0)} m`,
+    'model-align': c.curved ? `Curved · R ${c.radius} m` : 'Straight',
+    'model-skew': `${c.skew}° · ${c.elevation} m`,
+    'model-profile': c.profile === 'crest' ? `Crest ${c.rise} m` : `Grade ${c.grade} %`,
+    'deck-road': `${c.width} m · ${c.laneCount === 0 ? 'no lane' : count(c.laneCount, 'lane')}${c.trafficMode === 'cyclists' ? ' · cycling' : ''}`,
+    'deck-crossfall': label('crossfall'),
+    'deck-median': label('medianType'),
+    'deck-walk': c.sidewalkSide === 'none' ? 'None' : `${label('sidewalkSide')} · ${c.sidewalkWidth} m`,
+    'deck-rail': `${c.leftRailing} / ${c.rightRailing}`,
+    'deck-approach': label('approachBarrier'),
+    'deck-light': c.lighting === 'none' ? 'Off' : `${label('lighting')} · ${c.lightSpacing} m`,
+    'str-system': label('structureSystem'),
+    'str-type': label('material'),
+    'str-dim': c.material === 'slab' ? `${c.slabDepth} m` : c.material === 'concrete' ? `NEBT ${Math.round(c.depth * 1000)}` : `${c.depth} m`,
+    'str-depth': `${c.variableDepth ? 'Variable' : 'Constant'}${c.continuous ? ' · continuous' : ''}`,
+    'str-conc': label('concreteFinish'),
+    'str-steel': steelName(),
+    'sup-type': label('pierType'),
+    'sup-columns': `${c.pierType === 'bent' ? c.columns + ' × ' : ''}${label('columnShape').toLowerCase()}`,
+    'sup-cap': `${c.bentWidth} × ${c.bentThickness} m`,
+    'sup-wall': `${c.wallThickness} m`,
+    'sup-portal': c.portalBeam ? 'With tie beam' : 'No tie beam',
+    'sup-vshape': `${c.vAngle}° · ${c.vArmThickness} m`,
+    'sup-hammerhead': `${c.hammerheadWidth} × ${c.hammerheadThickness} m`,
+    'sup-abut': `${label('abutmentType')}${c.approachWalls === 'mse' ? ' · MSE' : ''}`,
+    'sup-slope': c.approachWalls === 'mse' ? 'n/a' : c.frontSlope ? 'Slope on' : 'Slope off',
+    'site-cross': kinds,
+    'site-terrain': `${label('terrainShape')} · ${label('terrainMode')}`,
+    'site-env': `${label('environment')} · seed ${c.seed}`,
+    'site-river': label('waterStyle'),
+    'site-sky': `${label('skyMode')} · ${label('weather')}${c.birds === false ? '' : ' · birds'}`,
+    'site-render': `${label('renderQuality')}${c.bloom ? ' · glow' : ''}`,
+  };
+  for (const el of document.querySelectorAll('[data-meta]')) el.textContent = meta[el.dataset.meta] ?? '';
+}
+// Numeric fields accept formulas: read the evaluated value, or keep the model's own when the text is invalid.
+const numberOr = (el, fallback) => {
+  const v = numValue(el);
+  return Number.isNaN(v) ? fallback : v;
+};
 function readForm() {
   const raw = structuredClone(config);
   for (const el of form.elements) {
@@ -378,13 +503,17 @@ function readForm() {
     raw[el.name] =
       el.type === 'checkbox'
         ? el.checked
-        : el.type === 'number' || el.name === 'direction' || el.name === 'archSpan'
-          ? Number(el.value)
-          : el.value;
+        : isNum(el)
+          ? numberOr(el, config[el.name])
+          : el.name === 'direction' || el.name === 'archSpan'
+            ? Number(el.value)
+            : el.value;
   }
   if (raw.material === 'concrete' && !raw.curved) raw.depth = Number($('nebt').value) || 1.4;
   for (const el of form.querySelectorAll('[data-span]:not([data-key="clearance"])'))
-    raw.spans[Number(el.dataset.span)][el.dataset.key] = el.type === 'number' ? Number(el.value) : el.value;
+    raw.spans[Number(el.dataset.span)][el.dataset.key] = isNum(el)
+      ? numberOr(el, raw.spans[Number(el.dataset.span)][el.dataset.key])
+      : el.value;
   return raw;
 }
 function applyTimeOfDay(hour) {
@@ -440,7 +569,7 @@ function applyTimeOfDay(hour) {
     config.skyMode === 'clouds' || wet ? (wet ? 0.18 : 0.42) * daylight * (1 - 0.6 * golden) : 0;
   weather?.set(config.weather, daylight);
   // Ambient touches (0.6.0): birds by day, vehicle lamps after dusk, wet (glossier) road and concrete in rain.
-  ambient?.set(daylight, golden, config.weather, scene.userData.birdCentre);
+  ambient?.set(daylight, golden, config.weather, scene.userData.birdCentre, config.birds !== false);
   setVehicleLights(1 - T.MathUtils.smoothstep(daylight, 0.08, 0.45));
   if (materials) {
     const rain = config.weather === 'rain';
@@ -842,7 +971,7 @@ function update(raw, options = {}) {
   });
   return updateQueue;
 }
-function rebuild(raw, { resetCamera = false, refresh = false } = {}) {
+function rebuild(raw, { resetCamera = false, refresh = false, noHistory = false, editKey = null, baseline = false } = {}) {
   stopDriving();
   const next = validate(raw),
     started = performance.now(),
@@ -915,6 +1044,8 @@ function rebuild(raw, { resetCamera = false, refresh = false } = {}) {
   scene.userData.radius = frameShadows(scene.userData.lights.sun, model);
   scene.userData.birdCentre = new T.Box3().setFromObject(model.structure).getCenter(new T.Vector3());
   applyTimeOfDay(config.timeOfDay);
+  // Undo / redo steps and the dirty marker follow every successful rebuild (undo and redo apply their own snapshot).
+  if (!noHistory) hist.track({ key: editKey, baseline });
   window.bridgeSketch = window.bridgeViewer = {
     getConfig: () => structuredClone(config),
     frames: () => frameCount,
@@ -1386,6 +1517,24 @@ async function boot() {
     trackPerformance(time, animated || fly);
   });
   registerTools();
+  // Offer the unsaved session of last time (a shared link always wins), otherwise start saving this one.
+  const previous = location.hash ? null : hist.peek();
+  if (previous)
+    showRestoreBar(previous, {
+      onRestore: async () => {
+        try {
+          await update(previous.config, { refresh: true, resetCamera: true, noHistory: true });
+          restoreCamera(previous.camera);
+          hist.accept(previous);
+          notify('Previous session restored.');
+        } catch (e) {
+          hist.dismiss();
+          notify(`${e.message} The stored session could not be restored.`, true);
+        }
+      },
+      onDismiss: () => hist.dismiss(),
+    });
+  else hist.arm();
   // Launch sequence: leave the intro once the first frame is on screen, then settle the camera on the bridge.
   if (intro) {
     requestAnimationFrame(() => requestAnimationFrame(() => intro.ready()));
@@ -1482,13 +1631,15 @@ document.querySelector('.view-options').addEventListener('change', e => {
 });
 form.addEventListener('change', async e => {
   if (e.target.id === 'activeSpan') return;
+  // Typed fields coalesce into one undo step when they are edited again within 800 ms.
+  const editKey = isNum(e.target) ? (e.target.name || e.target.id || `${e.target.dataset.span}:${e.target.dataset.key}`) : null;
   try {
     if (e.target.id === 'spanCount') {
-      const count = Number(e.target.value);
+      const count = numValue(e.target);
       if (!Number.isInteger(count) || count < 1 || count > 8) throw Error('Use 1 to 8 spans.');
       const raw = readForm();
       raw.spans = Array.from({ length: count }, (_, i) => raw.spans[i] ?? { ...raw.spans.at(-1) });
-      await update(raw, { refresh: true, resetCamera: true });
+      await update(raw, { refresh: true, resetCamera: true, editKey });
     } else {
       const raw = readForm();
       if (raw.curved && raw.material === 'concrete') raw.material = 'steel';
@@ -1521,7 +1672,7 @@ form.addEventListener('change', async e => {
       if (e.target.dataset.span !== undefined) {
         const index = Number(e.target.dataset.span),
           key = e.target.dataset.key;
-        if (key === 'clearance') setClearance(raw, index, Number(e.target.value));
+        if (key === 'clearance') setClearance(raw, index, numValue(e.target));
         if (raw.spans[index].obstacle === 'water') {
           let a = index,
             b = index;
@@ -1530,11 +1681,11 @@ form.addEventListener('change', async e => {
           for (let j = a; j <= b; j++)
             for (const k of ['elevation', 'angle']) {
               raw.spans[j][k] = raw.spans[index][k];
-              form.querySelector(`[data-span="${j}"][data-key="${k}"]`).value = raw.spans[index][k];
+              setNum(form.querySelector(`[data-span="${j}"][data-key="${k}"]`), raw.spans[index][k]);
             }
         }
       }
-      if (e.target.id === 'boxCount') raw.girders = Number(e.target.value);
+      if (e.target.id === 'boxCount') raw.girders = numValue(e.target);
       if (e.target.name === 'bentThickness' && config.bentEndThickness === config.bentThickness)
         raw.bentEndThickness = raw.bentThickness;
       if (e.target.name === 'material' && raw.material === 'box') raw.girders = raw.width < 7 ? 1 : 2;
@@ -1584,7 +1735,10 @@ form.addEventListener('change', async e => {
         $('nebt').value = raw.depth;
       }
       // Keep the edited crossing input and its focus alive for repeated arrow clicks.
-      await update(raw, { refresh: e.target.dataset.span === undefined || e.target.dataset.key === 'obstacle' });
+      await update(raw, {
+        refresh: e.target.dataset.span === undefined || e.target.dataset.key === 'obstacle',
+        editKey,
+      });
     }
     $('feedback').hidden = true;
   } catch (error) {
@@ -1613,7 +1767,7 @@ $('reset').onclick = () => selectPreset(presets[0].id);
 async function selectPreset(id) {
   const preset = presets.find(p => p.id === id);
   if (!preset) return;
-  await update(makePreset(id), { refresh: true, heavy: true });
+  await update(makePreset(id), { refresh: true, heavy: true, baseline: true });
   fit('perspective');
   $('preset').value = id;
   if (!config.name) $('sceneTitle').textContent = preset.label;
@@ -1645,6 +1799,7 @@ $('save').onclick = () => {
     camera: captureCamera(),
   };
   download(new Blob([JSON.stringify(saved, null, 2)], { type: 'application/json' }), fileBase() + '.json');
+  hist.markSaved();
   notify(`Saved ${fileBase()}.json`);
 };
 $('variantName').addEventListener('input', () => {
@@ -1652,11 +1807,13 @@ $('variantName').addEventListener('input', () => {
     .value.replace(/[\u0000-\u001f]/g, '')
     .slice(0, 60);
   updateHeading();
+  hist.track({ key: 'variantName' });
 });
 $('variantName').addEventListener('change', () => {
   config.name = config.name.trim();
   $('variantName').value = config.name;
   updateHeading();
+  hist.track({ key: 'variantName' });
 });
 $('load').onclick = () => $('file').click();
 $('file').onchange = async () => {
@@ -1669,7 +1826,7 @@ $('file').onchange = async () => {
         config: validate({ ...(data.config ?? data), name: data.config?.name ?? data.name ?? '' }),
         camera: data.camera,
       };
-    await update(saved.config, { refresh: true, resetCamera: true });
+    await update(saved.config, { refresh: true, resetCamera: true, baseline: true });
     restoreCamera(saved.camera);
     notify('Configuration loaded.');
   } catch (e) {
@@ -1803,9 +1960,13 @@ $('export-glb').onclick = async () => {
     copy.children[1].children.find(o => o.name === 'Concrete deck haunches').visible = true;
     copy.children[2].visible = true;
     waterMaterial = new T.MeshStandardMaterial({ color: '#1f5059', roughness: 0.12 });
+    const shadows = [];
     copy.traverse(o => {
       if (o.material?.isShaderMaterial || o.material?.userData.water) o.material = waterMaterial;
+      if (o.name === 'Contact shadow' || o.material?.name === 'Contact shadow') shadows.push(o);
     });
+    // Vehicle contact shadows are a viewport effect only.
+    for (const o of shadows) o.removeFromParent();
     const binary = await new GLTFExporter().parseAsync(copy, { binary: true, maxTextureSize: 1024 });
     download(new Blob([binary], { type: 'model/gltf-binary' }), fileBase() + '.glb');
     notify('3D model exported. Save JSON to keep editable parameters.');
@@ -1889,7 +2050,7 @@ function registerTools() {
 window.addEventListener('hashchange', async () => {
   try {
     const saved = decodeConfig(location.hash);
-    await update(saved.config, { refresh: true, resetCamera: true });
+    await update(saved.config, { refresh: true, resetCamera: true, baseline: true });
     restoreCamera(saved.camera);
   } catch (e) {
     notify(e.message, true);

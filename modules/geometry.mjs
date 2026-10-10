@@ -67,6 +67,7 @@ export const defaults = {
   vCap: true,
   hammerheadFlare: 1.5,
   bloom: true,
+  birds: true,
   vAngle: 20,
   vArmThickness: 1,
   skew: 0,
@@ -474,6 +475,7 @@ export function validate(raw) {
     !['rectangular', 'oblong', 'flared'].includes(c.hammerheadShape) ||
     typeof c.vCap !== 'boolean' ||
     typeof c.bloom !== 'boolean' ||
+    typeof c.birds !== 'boolean' ||
     typeof c.portalBeam !== 'boolean' ||
     !Number.isInteger(c.columns) ||
     c.columns < 1 ||

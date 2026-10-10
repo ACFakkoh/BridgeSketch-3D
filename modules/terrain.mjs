@@ -599,7 +599,7 @@ const cosmeticKeys = new Set([
   'version', 'name', 'steelColor', 'fasciaColor', 'barrierType', 'leftRailing', 'rightRailing', 'sidewalkRailing',
   'approachBarrier', 'lighting', 'lightSpacing', 'lightColor', 'lightSides', 'showTraffic', 'movingTraffic',
   'waterStyle', 'skyMode', 'renderQuality', 'fog', 'weather', 'background', 'timeOfDay', 'timeFlow', 'trainStyle',
-  'centreLine', 'concreteFinish', 'girderScreens', 'skyModel',
+  'centreLine', 'concreteFinish', 'girderScreens', 'skyModel', 'birds',
   // Pier details: the meadow clearance around supports depends only on the support lines.
   'pierType', 'columns', 'columnShape', 'columnDiameter', 'columnThickness', 'columnSpread', 'bentWidth',
   'bentThickness', 'bentEndThickness', 'bentTaperStart', 'hammerheadWidth', 'hammerheadThickness', 'wallThickness',
