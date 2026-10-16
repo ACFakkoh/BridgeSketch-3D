@@ -58,7 +58,8 @@ const {
   animateTraffic,
 } = await import('../modules/scene.mjs');
 const T = await import('three');
-const { makeTrain, kenneySize, buildingStyles } = await import('../modules/kenney-scene.mjs');
+const { kenneySize, buildingStyles } = await import('../modules/kenney-scene.mjs');
+const { makeTrain, consist } = await import('../modules/trains.mjs');
 const { obstacleTour } = await import('../modules/scene.mjs');
 for (const obstacle of ['road', 'rail', 'water'])
   for (const curved of [false, true]) {
@@ -410,7 +411,9 @@ const concreteSingle = validate({
   variableDepth: true,
   pierDepth: 2,
 });
-assert.equal(girderDepth(concreteSingle, 0.5), 2);
+// NEBT has no variable depth since 0.6.1: validation forces it off.
+assert.equal(concreteSingle.variableDepth, false);
+assert.equal(girderDepth(concreteSingle, 0.5), concreteSingle.depth);
 assert.equal(girderDepth(concreteSingle, 12.5), concreteSingle.depth);
 const concreteModel = buildBridge(concreteSingle, makeMaterials(), { batch: false });
 assert.ok(concreteModel.structure.children.some(o => o.name === 'Span 1 girder 1'));
@@ -608,7 +611,7 @@ const railConfig = validate({ ...c, trainStyle: 'bullet', spans: [{ ...c.spans[0
 const railScene = buildBridge(railConfig, materials, { batch: false });
 const trains = railScene.vehicles.filter(o => o.userData.route.type === 'train');
 assert.equal(trains.length, 1, 'Only one train occupies a railway crossing');
-assert.equal(trains[0].children.at(-1).name, 'Kenney train-electric-bullet-a');
+assert.equal(trains[0].userData.lead, 'intercityLoco');
 assert.equal(trains[0].userData.frontAxis, '+X');
 if (trains[0].userData.route.road.width >= 7)
   assert.equal(
@@ -693,14 +696,20 @@ assert.equal(validate({ ...defaults, steelColor: 'blue15090' }).steelColor, 'blu
 assert.equal(materials.steel.map, null);
 for (const style of ['diesel', 'bullet', 'city'])
   for (const count of [4, 8, 12]) {
-    const train = makeTrain(style, materials.steel, count);
-    assert.equal(train.children.length, count);
+    // 0.6.2 procedural trains: full-size cars (17.7–25.9 m), at most 4.8 m high, 1435 mm gauge.
+    const train = makeTrain(style, count, 7),
+      bounds = new T.Box3().setFromObject(train),
+      cars = consist(style, count, 7);
     assert.equal(train.userData.cars, count);
-    assert.ok(train.userData.length > 30);
-    assert.ok(train.children.at(-1).name.endsWith('-a'), 'Cab leads in +X direction');
-    train.traverse(o => o.geometry?.dispose());
+    assert.ok(train.userData.length > count * 17 && train.userData.length < count * 27, 'Full-size cars');
+    assert.ok(Math.abs(bounds.max.x - bounds.min.x - train.userData.length) < 1.2, 'Length matches the geometry');
+    assert.ok(bounds.min.y > -0.01 && bounds.max.y < 4.8, 'Wheels on the rails, realistic height (clears a 5 m soffit)');
+    assert.ok(bounds.max.z < 1.7 && bounds.min.z > -1.7, 'Within the 3.4 m loading gauge');
+    assert.equal(cars.at(-1)[0], { diesel: 'locomotive', bullet: 'intercityLoco', city: 'emuCab' }[style], 'Cab leads in +X direction');
+    if (style === 'city') assert.ok(cars[0][2], 'Rear cab car is turned');
+    assert.ok(train.children.every(o => o.userData.sharedGeometry), 'Car templates are shared between trains');
   }
-for (const count of [3, 13, 4.5]) assert.throws(() => makeTrain('city', materials.steel, count), /4 to 12/);
+for (const count of [3, 13, 4.5]) assert.throws(() => makeTrain('city', count), /4 to 12/);
 assert.equal(buildingStyles.length, 4);
 assert.ok(buildingStyles.every(name => kenneySize(name)[1] > 4));
 assert.throws(() => validate({ ...c, columnShape: 'triangle' }), /square/);
@@ -1517,14 +1526,42 @@ for (const folder of ['.', 'modules', 'models', 'vendor', 'textures'])
   for (const concreteFinish of ['light', 'warm', 'rough']) {
     const model = buildBridge(validate({ ...c, terrainMode: 'snow', showTraffic: false, concreteFinish }), finishMats, { batch: false });
     for (const [i, mat] of [finishMats.concrete, finishMats.edge].entries()) {
-      const expected = concreteFinish === 'rough' ? originals[i] : new T.Color(concreteFinish === 'light' ? '#8f9a9e' : '#b5b4ab');
-      assert.ok(mat.color.equals(expected), 'Finish applies the reference colour and restores the original rough concrete');
+      // Since 0.6.1 the old 'rough' links open in cool grey.
+      const expected = new T.Color(concreteFinish === 'warm' ? '#b5b4ab' : '#8f9a9e');
+      assert.ok(mat.color.equals(expected), 'Finish applies the selected colour (old rough links: cool grey)');
       for (const [key, texture] of Object.entries(maps)) assert.equal(mat[key], texture, 'Concrete texture maps survive a colour change');
     }
     disposeModel(model);
   }
   for (const texture of Object.values(maps)) texture.dispose();
   for (const m of Object.values(finishMats)) (m.isMaterial ? [m] : Object.values(m)).forEach(x => x.dispose());
+}
+// 0.6.2 road profile: chainage 0 at the west abutment front face, datum 30.000 there, 5 m grid, support axes.
+{
+  const { profileTable, profileCsv, frenchNumber, FRONT_FACE } = await import('../modules/road-profile.mjs');
+  const pc = makePreset('river'),
+    rows = profileTable(pc),
+    L = totalLength(pc);
+  const zero = rows.find(r => r.label.startsWith('West axis'));
+  assert.equal(zero.chainage, 0);
+  assert.ok(Math.abs(zero.elevation - 30) < 1e-9, 'West axis at the 30.000 m datum');
+  assert.ok(Math.abs(rows.find(r => r.label.startsWith('East axis')).chainage - (L - 2 * FRONT_FACE)) < 1e-9);
+  assert.equal(rows.filter(r => /^Pier \d+ axis/.test(r.label)).length, pc.spans.length - 1);
+  assert.ok(rows.every((r, i) => i === 0 || r.chainage > rows[i - 1].chainage), 'Chainages increase');
+  assert.ok(Math.abs(rows[0].chainage - (-pc.approach - FRONT_FACE)) < 1e-9 && rows.at(-1).part === 'East approach');
+  const grid = rows.filter(r => !r.label);
+  assert.ok(grid.length > 10 && grid.every(r => Math.abs(r.chainage / 5 - Math.round(r.chainage / 5)) < 1e-6), '5 m chainage grid');
+  for (const r of rows) {
+    const s = r.chainage + FRONT_FACE;
+    assert.ok(Math.abs(r.elevation - (30 + profile(pc, s) - profile(pc, FRONT_FACE))) < 1e-9);
+  }
+  const custom = profileTable(pc, { step: 10, datum: 112.5 });
+  assert.ok(custom.filter(r => !r.label).length < grid.length && Math.abs(custom.find(r => r.chainage === 0).elevation - 112.5) < 1e-9);
+  assert.equal(frenchNumber(30), '30,000');
+  assert.equal(frenchNumber(-1.2345), '-1,234');
+  const csv = profileCsv(pc, rows, { step: 5, datum: 30 });
+  assert.ok(csv.startsWith('﻿') && csv.includes('Chainage (m);Elevation (m);Part;Point') && csv.includes('0,000;30,000;Bridge;West axis'));
+  assert.throws(() => profileTable(pc, { step: 0 }));
 }
 console.log(
   `Checks passed: validation, round trips, 0.6.0 crossfall / diaphragms / screens / railings / roads, skew intersections, continuous boxes, slab soffits, 2H:1V cones, scenery, square columns, traffic and generated scene matrix. Geometry-matrix max ${maxTriangles.toLocaleString()} triangles. Static files ${(bytes / 1e6).toFixed(2)} MB; gzip estimate ${(gzipBytes / 1e6).toFixed(2)} MB.`,

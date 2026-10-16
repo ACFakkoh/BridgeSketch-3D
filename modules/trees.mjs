@@ -23,10 +23,82 @@ export const species = [
 ];
 const cache = new Map();
 
+// Foliage clumps (0.6.2): the EZ-Tree twigs alone read as a thin, see-through crown. The leaf positions are grouped
+// (k-means) into clumps, and each clump gets three crossed cards of a dense foliage texture, with normals bent
+// out from the crown centre so the canopy shades like a volume. About 80 triangles per tree.
+function seededRandom(seed) {
+  return () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
+}
+export function clumpGeometry(points, { count = 12, seed = 1, scale = 1.25, minRadius = 0.05 } = {}) {
+  const rng = seededRandom(seed),
+    k = Math.min(count, points.length);
+  if (!k) return null;
+  let centres = Array.from({ length: k }, (_, i) => points[Math.floor(((i + 0.5) * points.length) / k)].clone());
+  const owner = new Array(points.length).fill(0);
+  for (let pass = 0; pass < 8; pass++) {
+    points.forEach((p, i) => {
+      let best = 0,
+        bestD = Infinity;
+      centres.forEach((c, j) => {
+        const d = c.distanceToSquared(p);
+        if (d < bestD) (bestD = d), (best = j);
+      });
+      owner[i] = best;
+    });
+    centres = centres.map((c, j) => {
+      const mine = points.filter((_, i) => owner[i] === j);
+      return mine.length ? mine.reduce((a, p) => a.add(p), new T.Vector3()).divideScalar(mine.length) : c;
+    });
+  }
+  const crown = centres.reduce((a, c) => a.add(c), new T.Vector3()).divideScalar(centres.length),
+    position = [],
+    normal = [],
+    uv = [],
+    index = [];
+  centres.forEach((c, j) => {
+    const mine = points.filter((_, i) => owner[i] === j);
+    if (!mine.length) return;
+    const r = Math.max(minRadius, Math.sqrt(mine.reduce((a, p) => a + p.distanceToSquared(c), 0) / mine.length)) * scale,
+      out = c.clone().sub(crown).setY((c.y - crown.y) * 0.6 + 0.25).normalize(),
+      yaw = rng() * Math.PI;
+    // Three cards: two crossed upright ones and one tilted towards the sky.
+    for (const [a, tilt] of [
+      [yaw, 0.18],
+      [yaw + Math.PI / 2, -0.18],
+      [yaw + Math.PI / 4, 1.2],
+    ]) {
+      const ax = new T.Vector3(Math.cos(a), 0, Math.sin(a)),
+        up = new T.Vector3(0, 1, 0).applyAxisAngle(ax, tilt),
+        base = position.length / 3;
+      for (const [sx, sy] of [
+        [-1, -1],
+        [1, -1],
+        [1, 1],
+        [-1, 1],
+      ]) {
+        const v = c.clone().addScaledVector(ax, sx * r).addScaledVector(up, sy * r);
+        position.push(v.x, v.y, v.z);
+        // Crown normal from the canopy centre, slightly bent by the corner for a rounded clump.
+        const n = v.clone().sub(c).multiplyScalar(0.6 / r).add(out).normalize();
+        normal.push(n.x, n.y, n.z);
+        uv.push((sx + 1) / 2, (sy + 1) / 2);
+      }
+      index.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+  });
+  const g = new T.BufferGeometry();
+  g.setAttribute('position', new T.Float32BufferAttribute(position, 3));
+  g.setAttribute('normal', new T.Float32BufferAttribute(normal, 3));
+  g.setAttribute('uv', new T.Float32BufferAttribute(uv, 2));
+  g.setIndex(index);
+  g.computeBoundingSphere();
+  return g;
+}
+
 // Unit-height geometries (1 m tall, base at the origin), cached across rebuilds.
 export function treeKit(quality = 'balanced') {
   if (cache.has(quality)) return cache.get(quality);
-  const kit = species.map(sp => {
+  const kit = species.map((sp, n) => {
     const tree = new Tree();
     tree.options.copy(structuredClone(TreePreset[sp.preset]));
     const { branches, leaves } = tree.createGeometry(detail[quality] ?? detail.balanced);
@@ -36,12 +108,33 @@ export function treeKit(quality = 'balanced') {
       g.scale(1 / h, 1 / h, 1 / h);
       g.computeBoundingSphere();
     }
+    // Leaf centres (origin + half a leaf along its length), in unit-height space.
+    const centres = tree.skeleton.leaves.map(({ origin, orientation, size }) =>
+        new T.Vector3(0, size / 2, 0).applyEuler(orientation).add(origin).divideScalar(h),
+      ),
+      clumps = clumpGeometry(centres, { count: quality === 'far' ? 9 : 14, seed: 977 + n * 131 });
     tree.branchesMesh.geometry.dispose();
     tree.leavesMesh.geometry.dispose();
-    return { ...sp, branches, leaves };
+    return { ...sp, branches, leaves, clumps };
   });
   cache.set(quality, kit);
   return kit;
+}
+
+// Understory shrub (0.6.2): a low dome of foliage clumps, about 1 m tall at scale 1 (instanced at forest edges).
+let shrub = null;
+export function shrubGeometry() {
+  if (shrub) return shrub;
+  const rng = seededRandom(4242),
+    points = [];
+  for (let i = 0; i < 90; i++) {
+    const a = rng() * Math.PI * 2,
+      r = Math.sqrt(rng()) * 0.75,
+      y = 0.25 + rng() * 0.55 * (1 - r * 0.6);
+    points.push(new T.Vector3(Math.cos(a) * r, y, Math.sin(a) * r));
+  }
+  shrub = clumpGeometry(points, { count: 7, seed: 77, scale: 1.6, minRadius: 0.18 });
+  return shrub;
 }
 
 // Leaf material: alpha-tested texture, wind sway shared with the meadow, translucent back-lighting.
@@ -133,7 +226,8 @@ export function addTrees(parent, m, trees, rng, { quality = 'balanced', season =
     tint = new T.Color(),
     autumn = fallPalette.map(c => new T.Color(c)),
     sets = [];
-  const leafSet = season === 'snow' ? m.leavesSnow : season === 'fall' ? m.leavesFall : m.leaves;
+  const leafSet = season === 'snow' ? m.leavesSnow : season === 'fall' ? m.leavesFall : m.leaves,
+    clumpMaterial = season === 'snow' ? m.clumpsSnow : season === 'fall' ? m.clumpsFall : m.clumps;
   kits[0].forEach((sp, k) => {
     const items = groups[k];
     if (!items.length) return;
@@ -158,7 +252,8 @@ export function addTrees(parent, m, trees, rng, { quality = 'balanced', season =
         [
           [kit[k].branches, m.bark, `EZ-Tree ${sp.preset} bark${level ? ' (far)' : ''}`],
           [kit[k].leaves, leafMaterial, `EZ-Tree ${sp.preset} leaves${level ? ' (far)' : ''}`],
-        ].map(([geometry, material, name]) => {
+          [clumpMaterial && kit[k].clumps, clumpMaterial, `EZ-Tree ${sp.preset} foliage clumps${level ? ' (far)' : ''}`],
+        ].filter(([geometry]) => geometry).map(([geometry, material, name]) => {
           const mesh = new T.InstancedMesh(geometry, material, items.length);
           mesh.name = name;
           mesh.castShadow = true;
@@ -207,4 +302,33 @@ export function addTrees(parent, m, trees, rng, { quality = 'balanced', season =
   // Until the viewer reports a camera, every tree uses the near geometry (also for Node checks and GLB export).
   lod(new T.Vector3(0, 0, 0), true);
   return { lod, count: trees.length };
+}
+
+// Understory shrubs at the forest edges and under the trees: one instanced draw call, instance colours like the trees.
+export function addShrubs(parent, m, shrubs, season = 'summer') {
+  const material = season === 'snow' ? m.clumpsSnow : season === 'fall' ? m.clumpsFall : m.clumps;
+  if (!shrubs.length || !material) return null;
+  const mesh = new T.InstancedMesh(shrubGeometry(), material, shrubs.length),
+    dummy = new T.Object3D(),
+    tint = new T.Color(),
+    autumn = fallPalette.map(c => new T.Color(c));
+  shrubs.forEach((b, i) => {
+    dummy.position.set(b.x, b.y - 0.1, b.z);
+    dummy.rotation.set(0, b.rotation, 0);
+    dummy.scale.set(b.scale * b.spread, b.scale, b.scale * b.spread);
+    dummy.updateMatrix();
+    mesh.setMatrixAt(i, dummy.matrix);
+    mesh.setColorAt(
+      i,
+      season === 'fall'
+        ? tint.copy(autumn[Math.floor(b.hue * autumn.length * 0.999)])
+        : tint.setHSL(0.25 + (b.hue - 0.5) * 0.05, 0.3, 0.5).lerp(new T.Color(1, 1, 1), 0.66),
+    );
+  });
+  mesh.name = 'Understory shrubs';
+  mesh.castShadow = mesh.receiveShadow = true;
+  mesh.userData.sharedGeometry = true;
+  mesh.customDepthMaterial = new T.MeshDepthMaterial({ depthPacking: T.RGBADepthPacking, map: material.map, alphaTest: 0.5, side: T.DoubleSide });
+  parent.add(mesh);
+  return mesh;
 }

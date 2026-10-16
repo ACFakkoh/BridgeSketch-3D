@@ -904,6 +904,21 @@
               <div><span>Min. clearance*</span><strong id="clearance"></strong></div>
               <div><span>Geometry</span><strong id="triangles"></strong></div>
               <p>* Conservative whole-span bound with 200 mm allowance.</p>
+              <section class="profile-summary" aria-labelledby="profileTitle">
+                <h3 id="profileTitle">Road profile · centre line</h3>
+                <div class="profile-fields">
+                  <label>Chainage step (m)<input id="profileStep" inputmode="decimal" value="5" /></label
+                  ><label>Elevation at west axis (m)<input id="profileDatum" inputmode="decimal" value="30,000" /></label>
+                </div>
+                <div class="profile-scroll">
+                  <table id="profileTable">
+                    <thead><tr><th>Chainage</th><th>Elevation</th><th>Point</th></tr></thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+                <p>Chainage 0 m: west axis, outer face of the west abutment front wall. Top of asphalt at the centre line.</p>
+                <button id="exportProfile" type="button">Export profile CSV</button>
+              </section>
             </div>
           </details>
         </div>
@@ -926,6 +941,13 @@
         <p class="hint">
           Starfield and grass species adapted from CK42BB/procedural-stars-threejs and procedural-grass-threejs (MIT);
           physical sky after Tw1ddle/Sky-Shader and the three.js Sky object (MIT).
+        </p>
+        <h3>Version 0.6.2</h3>
+        <p>
+          A road profile table (chainage from the west abutment axis, elevations from a chosen datum) with CSV export,
+          full-size procedural trains, fuller tree crowns with denser woods and shrubs, more natural painted girders,
+          no cast shadows at night, a clean 3D view without its title, a flush abutment side and tapered caps that meet
+          their columns, and a much faster Reveal structure.
         </p>
         <h3>Version 0.6.1</h3>
         <p>

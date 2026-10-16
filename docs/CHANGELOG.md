@@ -1,5 +1,20 @@
 # BridgeSketch 3D
 
+## 0.6.2 — 2026-10-16 — Anthony Chéruel
+
+Source : page Notion « Bridge Sketch 3D vers 0.6.2 ».
+
+- Nuit : plus d'ombres portées (l'intensité d'ombre du soleil suit la lumière du jour ; la carte d'ombre n'est plus recalculée quand elle est nulle).
+- Vue 3D : titre et sous-titre retirés du coin supérieur gauche.
+- Culées : le siège, le mur garde-grève, les murs en retour et les cache-poutres partagent un même parement extérieur (75 mm en retrait du bord du tablier) ; ils formaient des marches de 75 à 100 mm.
+- Chevêtres effilés : un fût sous la partie effilée monte jusqu'au point le plus haut de la sous-face sur sa largeur (vide d'environ 75 mm côté extérieur auparavant).
+- Poutres peintes : occlusion de la lumière ambiante sous le tablier (les poutres recevaient tout le ciel, d'où des couleurs vives et plates), légère perte de chroma et poussière.
+- Performance : « Reveal structure » ne masque plus les PointLights des lampadaires (le changement du nombre de lumières recompilait tous les shaders, ≈ 1,5–2 s ; maintenant ≈ 30 ms). Semis d'herbe indexé par grille (reconstruction ≈ 35 % plus rapide). Véhicules en mouvement sans ombre solaire (carte d'ombre statique au lieu de 11 Hz) ; temps qui s'écoule : ombres toutes les 2 s, éclairage du ciel toutes les 4 s. Données Kenney réduites de 1,7 à 0,75 Mo.
+- Arbres : touffes de feuillage (k-moyennes sur les rameaux EZ-Tree, cartes croisées à normales de houppier), bosquets denses par champ de bruit, arbustes de sous-bois ; budget 260 / 380 / 520 arbres selon la qualité.
+- Trains procéduraux à l'échelle (`modules/trains.mjs`) : fret avec locomotive diesel 6 essieux de 22,3 m, wagons couverts, trémies, citernes et porte-conteneurs ; intercity avec locomotive profilée et voitures inox de 25,9 m ; automotrice de banlieue (voitures de 19–20 m, pantographes baissés). Remplacent le Train Kit Kenney.
+- Profil en long : tableau chaînage / élévation dans « Model info » (pas de 5 m par défaut, 0 m à l'axe Ouest = parement du mur de front de la culée Ouest, élévation 30,000 m par défaut à cet axe, axes des piles et extrémités) et export CSV (séparateur point-virgule, virgule décimale).
+- Tests : `node check.mjs` couvre le profil et les trains ; deux tests périmés depuis 0.6.1 corrigés (NEBT sans hauteur variable, ancien fini « rough »).
+
 ## 0.6.1 — 2026-10-10 — Anthony Chéruel
 
 Source : page Notion « BridgeSketch3D 0.6.1 update ».

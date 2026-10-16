@@ -1,13 +1,14 @@
 // BridgeSketch 3D · Site: crossings, terrain, approach fills and slopes, river, vegetation and buildings.
 import * as T from 'three';
-import { makeTrain, kenneyGeometry, kenneySize, buildingStyles } from './kenney-scene.mjs';
+import { kenneyGeometry, kenneySize, buildingStyles } from './kenney-scene.mjs';
+import { makeTrain } from './trains.mjs';
 import { alignmentStation, crossAt, frame, girderDepth, profile, totalLength, stations, supportStation, waterGroups } from './geometry.mjs';
 import { beam, box, seeded, soffitAt } from './sections.mjs';
 import { roadsideGuardrail } from './railings.mjs';
 import { positionVehicle, vehicle } from './traffic.mjs';
 import { trafficKind } from './vehicles.mjs';
 import { tuftGeometry, flowerGeometry, scatterMeadow, grassBudget, grassKinds } from './grass.mjs';
-import { addTrees } from './trees.mjs';
+import { addShrubs, addTrees } from './trees.mjs';
 import { effectiveQuality, renderSettings } from './quality.mjs';
 import { RAIL_BED } from './geometry.mjs';
 
@@ -972,7 +973,7 @@ export function addEnvironment(c, m, parent, fills) {
             ? ['diesel', 'bullet', 'city'][Math.floor(seeded(c.seed * 31 + railIndex * 7919 + 5)() * 3)]
             : c.trainStyle;
         const carCount = 4 + Math.floor(seeded(c.seed + railIndex * 1009 + 137)() * 9);
-        const train = makeTrain(style, m.train, carCount),
+        const train = makeTrain(style, carCount, c.seed + railIndex * 17),
           forward = (railIndex + c.seed) % 2 === 0;
         train.userData.route = {
           s: (forward ? -0.33 : 0.33) * halfLength,
@@ -1001,14 +1002,57 @@ export function addEnvironment(c, m, parent, fills) {
     }
     return intersectsRoad(roadZones, x, z, margin);
   };
-  const trees = [];
-  for (let i = 0; i < 2400 && c.environment === 'rural' && trees.length < 220; i++) {
-    const x = (rng() - 0.5) * (extent - 12),
-      z = (rng() - 0.5) * (2 * halfZ - 12),
+  // Woodland (0.6.2): groves where a low-frequency noise field is high, packed at 3–5 m with a few clearings, and
+  // scattered trees elsewhere. Crowns may approach a road or river closer inside a grove (2.2 m per scale unit);
+  // shrubs fill the grove floors and edges. Budgets follow the render quality.
+  const trees = [],
+    shrubs = [],
+    treeBudget = { performance: 260, balanced: 380, high: 520 }[tier] ?? 380,
+    woodSeed = c.seed * 0.137,
+    woodNoise = (x, z) => {
+      const n = (a, b) => {
+        const v = Math.sin(a * 127.1 + b * 311.7 + woodSeed * 74.7) * 43758.5453;
+        return v - Math.floor(v);
+      };
+      const smooth = (x, z) => {
+        const ix = Math.floor(x), iz = Math.floor(z), fx = x - ix, fz = z - iz, u = fx * fx * (3 - 2 * fx), v = fz * fz * (3 - 2 * fz);
+        return (n(ix, iz) * (1 - u) + n(ix + 1, iz) * u) * (1 - v) + (n(ix, iz + 1) * (1 - u) + n(ix + 1, iz + 1) * u) * v;
+      };
+      return smooth(x * 0.022, z * 0.022) * 0.7 + smooth(x * 0.07 + 9, z * 0.07) * 0.3;
+    },
+    spacingGrid = new Map(),
+    tooClose = (x, z, gap) => {
+      const i = Math.floor(x / 4), k = Math.floor(z / 4);
+      for (let a = i - 2; a <= i + 2; a++)
+        for (let b = k - 2; b <= k + 2; b++)
+          for (const t of spacingGrid.get(a * 4096 + b) ?? []) if (Math.hypot(t.x - x, t.z - z) < gap) return true;
+      return false;
+    };
+  for (let i = 0; i < treeBudget * 14 && c.environment === 'rural' && trees.length < treeBudget; i++) {
+    const x = (rng() - 0.5) * (extent - 8),
+      z = (rng() - 0.5) * (2 * halfZ - 8),
+      wood = T.MathUtils.smoothstep(woodNoise(x, z), 0.5, 0.66),
       scale = 1.1 + rng() * 1.5,
-      radius = scale * 3.5 + 1;
-    if (!occupied(x, z, radius) && !intersectsRoad(corridorZones, x, z, radius))
-      trees.push({ x, z, y: terrainHeight(x, z), scale, rotation: rng() * Math.PI });
+      radius = scale * (3.5 - 1.3 * wood) + 1;
+    if (rng() > 0.1 + 0.9 * wood || tooClose(x, z, 3 + 2 * (1 - wood) + scale * 0.6)) continue;
+    if (occupied(x, z, radius) || intersectsRoad(corridorZones, x, z, radius)) continue;
+    const t = { x, z, y: terrainHeight(x, z), scale, rotation: rng() * Math.PI, wood };
+    trees.push(t);
+    const key = Math.floor(x / 4) * 4096 + Math.floor(z / 4);
+    if (!spacingGrid.has(key)) spacingGrid.set(key, []);
+    spacingGrid.get(key).push(t);
+  }
+  // Shrubs: under and around the grove trees, 1–2.4 m high, never on roads, banks or supports.
+  for (const t of trees) {
+    const n = t.wood > 0.4 ? 2 : rng() < 0.35 ? 1 : 0;
+    for (let j = 0; j < n && shrubs.length < treeBudget * 1.2; j++) {
+      const a = rng() * Math.PI * 2,
+        d = 1.5 + rng() * 4.5,
+        x = t.x + Math.cos(a) * d,
+        z = t.z + Math.sin(a) * d;
+      if (Math.abs(x) > extent / 2 - 2 || Math.abs(z) > halfZ - 2 || occupied(x, z, 2.5) || intersectsRoad(corridorZones, x, z, 2.5)) continue;
+      shrubs.push({ x, z, y: terrainHeight(x, z), scale: 1 + rng() * 1.4, spread: 1 + rng() * 0.8, rotation: rng() * 6.28, hue: rng() });
+    }
   }
   const instanced = (geo, mat, items, transform) => {
     if (!items.length) {
@@ -1044,6 +1088,7 @@ export function addEnvironment(c, m, parent, fills) {
   for (const t of trees) t.hue = (rng() - 0.5) * 0.06;
   const forest = addTrees(parent, m, trees, rng, { quality: tier, season, near: renderSettings[tier].treeNear });
   if (forest) parent.userData.treeLod = forest.lod;
+  addShrubs(parent, m, shrubs, season);
   // Budgeted meadow (grass.mjs): denser near the bridge and in clumps, never on the submerged banks.
   if (c.terrainMode !== 'snow') {
     const nearWater = (x, z) =>
@@ -1071,8 +1116,22 @@ export function addEnvironment(c, m, parent, fills) {
           }),
         )
         .filter(t => Math.abs(t.area) >= 1e-8),
-      grassHeight = (x, z) => {
-        for (const { a, b, d, area, x0, x1, z0, z1 } of grassTriangles) {
+      // 0.6.2: a 4 m grid over the triangles' plan bounds, so each lookup tests a few triangles instead of all.
+      cell = 4,
+      gridX0 = Math.min(0, ...grassTriangles.map(t => t.x0)),
+      gridZ0 = Math.min(0, ...grassTriangles.map(t => t.z0)),
+      grid = new Map(),
+      gridKey = (i, k) => i * 65536 + k;
+    for (const t of grassTriangles)
+      for (let i = Math.floor((t.x0 - 1e-3 - gridX0) / cell); i <= Math.floor((t.x1 + 1e-3 - gridX0) / cell); i++)
+        for (let k = Math.floor((t.z0 - 1e-3 - gridZ0) / cell); k <= Math.floor((t.z1 + 1e-3 - gridZ0) / cell); k++) {
+          const key = gridKey(i, k);
+          if (!grid.has(key)) grid.set(key, []);
+          grid.get(key).push(t);
+        }
+    const grassHeight = (x, z) => {
+        const local = grid.get(gridKey(Math.floor((x - gridX0) / cell), Math.floor((z - gridZ0) / cell)));
+        if (local) for (const { a, b, d, area, x0, x1, z0, z1 } of local) {
           if (x < x0 - 1e-6 || x > x1 + 1e-6 || z < z0 - 1e-6 || z > z1 + 1e-6) continue;
           const bx = b[0] - a[0], bz = b[2] - a[2], dx = d[0] - a[0], dz = d[2] - a[2],
             u = ((x - a[0]) * dz - (z - a[2]) * dx) / area,

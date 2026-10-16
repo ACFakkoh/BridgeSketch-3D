@@ -149,14 +149,14 @@ export function makeMaterials(onLoad = () => {}) {
     m.glass.roughness = 0.22;
     m.roof.color.set('#656561');
     m.truck.color.set('#b49062');
-    for (const kit of ['train', 'suburban', 'commercial']) {
+    for (const kit of ['suburban', 'commercial']) {
       const atlas = loader.load(`./models/${kit}-colormap.webp`, onLoad);
       atlas.colorSpace = T.SRGBColorSpace;
       atlas.magFilter = T.NearestFilter;
       m[kit] = new T.MeshStandardMaterial({
         map: atlas,
-        roughness: kit === 'train' ? 0.48 : 0.84,
-        metalness: kit === 'train' ? 0.13 : 0,
+        roughness: 0.84,
+        metalness: 0,
       });
     }
   }
@@ -297,8 +297,14 @@ float soilNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mi
   m.steelFascia = material('#64707a', 0.7, 0.5);
   for (const steel of [m.steel, m.steelFascia]) {
   steel.userData.weathered = { value: 0 };
+  // 0.6.2: girders stand under the deck slab, which hides most of the sky. Without this occlusion they received
+  // the full sky and environment light, so their shaded faces were nearly as bright as the sunlit ones and
+  // saturated paints (red, green) looked vivid and flat. Indirect light is reduced under the deck (more on
+  // upward faces, which only see the slab soffit); the sun keeps its own shadows.
+  steel.userData.occlusion = { value: 0.5 };
   steel.onBeforeCompile = shader => {
     shader.uniforms.weathered = steel.userData.weathered;
+    shader.uniforms.deckOcclusion = steel.userData.occlusion;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 steelPosition;')
       .replace(
@@ -309,13 +315,28 @@ float soilNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mi
       .replace(
         '#include <common>',
         `#include <common>
-uniform float weathered;varying vec3 steelPosition;
+uniform float weathered,deckOcclusion;varying vec3 steelPosition;
 float steelHash(vec3 p){return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5453);}
 float steelNoise(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(mix(steelHash(i),steelHash(i+vec3(1,0,0)),f.x),mix(steelHash(i+vec3(0,1,0)),steelHash(i+vec3(1,1,0)),f.x),f.y),mix(mix(steelHash(i+vec3(0,0,1)),steelHash(i+vec3(1,0,1)),f.x),mix(steelHash(i+vec3(0,1,1)),steelHash(i+vec3(1,1,1)),f.x),f.y),f.z);}`,
       )
       .replace(
         '#include <color_fragment>',
-        '#include <color_fragment>\nfloat patina=steelNoise(steelPosition*vec3(2.,.42,2.));float rustGrain=steelNoise(steelPosition*35.);vec3 weathering=mix(vec3(.55,.40,.31),vec3(1.13,.94,.68),patina)*(.91+.18*rustGrain);diffuseColor.rgb*=mix(vec3(1.),weathering,weathered);',
+        `#include <color_fragment>
+float patina=steelNoise(steelPosition*vec3(2.,.42,2.));float rustGrain=steelNoise(steelPosition*35.);vec3 weathering=mix(vec3(.55,.40,.31),vec3(1.13,.94,.68),patina)*(.91+.18*rustGrain);diffuseColor.rgb*=mix(vec3(1.),weathering,weathered);
+// Painted finishes in service: slightly chalked (less chroma), faint dust mottling, darker grime on the lower parts.
+float painted=1.-weathered,dust=steelNoise(steelPosition*vec3(.7,2.4,.7));
+diffuseColor.rgb=mix(diffuseColor.rgb,vec3(dot(diffuseColor.rgb,vec3(.2126,.7152,.0722))),.14*painted);
+diffuseColor.rgb*=mix(1.,.9+.12*dust,painted);`,
+      )
+      .replace(
+        '#include <aomap_fragment>',
+        `#include <aomap_fragment>
+{
+  float up=clamp(inverseTransformDirection(normal,viewMatrix).y,0.,1.);
+  float occ=deckOcclusion*mix(1.,.6,up);
+  reflectedLight.indirectDiffuse*=occ;
+  reflectedLight.indirectSpecular*=mix(1.,occ,.7);
+}`,
       );
   };
   }
@@ -344,6 +365,10 @@ float steelNoise(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(m
     m.leavesSnow[leaf] = prepareLeafMaterial(material(tint, 0.82), 'snow');
     m.leavesFall[leaf] = prepareLeafMaterial(material('#ffffff', 0.8), 'fall');
   }
+  // Foliage clumps and understory shrubs (0.6.2): dense foliage cards, a touch darker than the twigs (inner crown).
+  m.clumps = prepareLeafMaterial(material('#f2f7ea', 0.85));
+  m.clumpsSnow = prepareLeafMaterial(material('#f2f7ea', 0.85), 'snow');
+  m.clumpsFall = prepareLeafMaterial(material('#ffffff', 0.82), 'fall');
   if (typeof document !== 'undefined') {
     const loader = new T.TextureLoader(),
       load = (file, srgb = true) => {
@@ -360,6 +385,7 @@ float steelNoise(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(m
     }
     for (const leaf of Object.keys(m.leaves))
       m.leaves[leaf].map = m.leavesSnow[leaf].map = m.leavesFall[leaf].map = load(`leaf-${leaf}.webp`);
+    m.clumps.map = m.clumpsSnow.map = m.clumpsFall.map = load('foliage-v2.webp');
   }
   // Pier water marks: a darker wet band and faint algae just above the river level, only on concrete inside the
   // river corridor (piers, not abutments far from the water). Set per scene by buildBridge.

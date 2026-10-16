@@ -25,6 +25,7 @@ import {
   crossfallSection,
 } from './geometry.mjs';
 import { psboxParts } from './systems.mjs';
+import { profileCsv, profileTable, frenchNumber } from './road-profile.mjs';
 import { release } from './release.mjs';
 import { presets, makePreset } from './presets.mjs';
 import {
@@ -72,6 +73,7 @@ import {
   showDirty,
   showRestoreBar,
   hideRestoreBar,
+  qbParse,
 } from './ui.mjs';
 
 // Golden hour: the sun about 7° above the horizon, 30 min before sunset.
@@ -105,12 +107,14 @@ let needsRender = true,
   envDirty = true,
   envAt = 0;
 // Frame budget (0.5.5): the sun's shadow map is redrawn only when something that casts a shadow changes
-// (rebuild, time of day, moving traffic at about 11 Hz, tree level-of-detail swaps at 2 Hz); ambient
+// (rebuild, time of day, every 2 s while the time flows, tree level-of-detail swaps at 2 Hz; moving vehicles
+// cast no sun shadow since 0.6.2); ambient
 // animation alone (water, clouds, wind, weather) renders at 30 fps; the reflection is refreshed every other
 // frame while the camera is still.
 let timeAppliedAt = 0,
   shadowDirty = true,
   shadowSoft = false,
+  shadowFlow = false,
   shadowAt = 0,
   lastInteraction = 0,
   lastFrameAt = 0,
@@ -515,7 +519,7 @@ function readForm() {
       : el.value;
   return raw;
 }
-function applyTimeOfDay(hour) {
+function applyTimeOfDay(hour, flowing = false) {
   if (!scene?.userData.lights) return;
   // Sun from 06:30 to 19:30 (autumn day). Daylight follows the sun elevation, so the evening only gets darker:
   // golden hour when the sun is low (about 18:30–19:30, peak 19:05), then blue hour, then night from 20:00.
@@ -528,9 +532,15 @@ function applyTimeOfDay(hour) {
     new T.Color(night).lerp(new T.Color(day), daylight).lerp(new T.Color(gold), golden);
   const { hemi, sun, fill, rim } = scene.userData.lights;
   sun.position.set(Math.cos(angle) * 80, 8 + 60 * Math.max(0, Math.sin(angle)), 40);
-  shadowDirty = true;
+  // Flowing time moves the sun by a few hundredths of a degree per step: its shadows are refreshed every 2 s.
+  if (flowing) shadowFlow = true;
+  else shadowDirty = true;
   sun.color.copy(tint('#a9c7ed', '#fff3dd', '#ff9a68'));
   sun.intensity = 0.4 + 2.8 * daylight - 0.35 * golden;
+  // No cast shadows at night: the residual "moonlight" key light fades its shadows out with the daylight
+  // (a uniform: toggling castShadow would recompile every shader at dusk), and the shadow map is no
+  // longer refreshed once they are gone (render loop).
+  sun.shadow.intensity = T.MathUtils.smoothstep(daylight, 0.04, 0.3);
   hemi.color.copy(tint('#7186a8', '#e1efff', '#ffc98f'));
   hemi.groundColor.copy(tint('#283844', '#687560', '#3d2930'));
   hemi.intensity = 0.65 + 1.75 * daylight - 0.55 * golden;
@@ -1029,6 +1039,7 @@ function rebuild(raw, { resetCamera = false, refresh = false, noHistory = false,
         ((o.geometry.index?.count ?? o.geometry.attributes.position.count) / 3) * (o.isInstancedMesh ? o.count : 1);
   });
   $('triangles').innerHTML = `${(triangles / 1000).toFixed(1)}<small>k tris</small>`;
+  renderProfile();
   updateHeading();
   syncTimePlay();
   $('sceneSubtitle').textContent =
@@ -1086,7 +1097,9 @@ function applyReveal() {
   shadowDirty = true;
   const hide = $('reveal').checked && !driving;
   model.deck.visible = model.haunches.visible = !hide;
-  if (model.lighting) model.lighting.group.visible = !hide;
+  // Only the poles, heads and glows are hidden: hiding the lamp PointLights would change the light count and
+  // recompile every material (about 2 s on an integrated GPU) at each toggle.
+  model.lighting?.setHidden(hide);
 }
 function syncTimePlay() {
   const on = config.timeFlow;
@@ -1265,6 +1278,52 @@ function driveFrame(dt) {
     '% · Esc to stop';
   needsRender = true;
 }
+// Road profile (0.6.2): chainage / elevation summary in Model info, exported as CSV. The step and the reference
+// elevation are viewer settings, remembered in this browser.
+const profileField = (id, fallback) => {
+  const el = $(id),
+    v = qbParse(el.value);
+  el.setAttribute('aria-invalid', String(!(Number.isFinite(v) && (id !== 'profileStep' || v > 0))));
+  return Number.isFinite(v) && (id !== 'profileStep' || v > 0) ? v : fallback;
+};
+const profileOptions = () => ({ step: Math.max(0.5, profileField('profileStep', 5)), datum: profileField('profileDatum', 30) });
+function renderProfile() {
+  if (!config) return;
+  const rows = profileTable(config, profileOptions());
+  $('profileTable').tBodies[0].replaceChildren(
+    ...rows.map(r => {
+      const tr = document.createElement('tr');
+      if (r.label) tr.className = 'axis';
+      for (const text of [frenchNumber(r.chainage), frenchNumber(r.elevation), r.label || r.part]) {
+        const td = document.createElement('td');
+        td.textContent = text;
+        tr.append(td);
+      }
+      return tr;
+    }),
+  );
+}
+try {
+  const saved = JSON.parse(localStorage.getItem('bridgesketch-profile-v1') || '{}');
+  if (saved.step) $('profileStep').value = saved.step;
+  if (saved.datum) $('profileDatum').value = saved.datum;
+} catch {}
+for (const id of ['profileStep', 'profileDatum'])
+  $(id).addEventListener('change', () => {
+    const options = profileOptions();
+    $('profileStep').value = frenchNumber(options.step).replace(/,?0+$/, '');
+    $('profileDatum').value = frenchNumber(options.datum);
+    try {
+      localStorage.setItem('bridgesketch-profile-v1', JSON.stringify({ step: $('profileStep').value, datum: $('profileDatum').value }));
+    } catch {}
+    renderProfile();
+  });
+$('exportProfile').onclick = () => {
+  const options = profileOptions(),
+    name = (config.name || 'bridge').replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '') || 'bridge';
+  download(new Blob([profileCsv(config, profileTable(config, options), options)], { type: 'text/csv;charset=utf-8' }), `${name}-road-profile.csv`);
+  notify('Road profile exported (semicolon separator, decimal comma).');
+};
 function download(blob, name) {
   const a = document.createElement('a'),
     url = URL.createObjectURL(blob);
@@ -1437,6 +1496,18 @@ async function boot() {
     else if (driving) driveFrame(dt);
     else controls.update(dt);
     const moving = config.movingTraffic && config.showTraffic;
+    // Moving vehicles keep their contact shadows but cast no sun shadow, so the shadow map stays static
+    // (it was redrawn about 11 times a second, the main cost of moving traffic on integrated GPUs).
+    if (model.vehicleShadows !== !moving) {
+      for (const v of model.vehicles)
+        v.traverse(o => {
+          if (!o.isMesh) return;
+          o.userData.sunShadow ??= o.castShadow;
+          o.castShadow = o.userData.sunShadow && !moving;
+        });
+      model.vehicleShadows = !moving;
+      shadowDirty = true;
+    }
     if (moving) animateTraffic(model, dt);
     const flowing = model.waters.length > 0;
     if (flowing) {
@@ -1459,11 +1530,11 @@ async function boot() {
       const night = (scene.userData.daylight ?? 1) < 0.05;
       config.timeOfDay = (config.timeOfDay + clockDt * (night ? 0.075 : 0.025)) % 24;
       if (time - timeAppliedAt > 500) {
-        applyTimeOfDay(config.timeOfDay);
+        applyTimeOfDay(config.timeOfDay, true);
         timeAppliedAt = time;
       }
     }
-    if (envDirty && time - envAt > (config.timeFlow ? 1500 : 120)) {
+    if (envDirty && time - envAt > (config.timeFlow ? 4000 : 120)) {
       scene.environment = sky.environment(renderer, config.skyMode === 'clouds');
       envDirty = false;
       envAt = time;
@@ -1478,11 +1549,11 @@ async function boot() {
     // Ambient-only animation is capped at 30 fps.
     const due = interactive || time - lastFrameAt >= 1000 / 30 - 2;
     if ((needsRender || animated) && due) {
-      if (moving && time - shadowAt > 90) shadowDirty = true;
       if (shadowSoft && time - shadowAt > 500) shadowDirty = true;
-      if (shadowDirty) {
+      if (shadowFlow && time - shadowAt > 2000) shadowDirty = true;
+      if (shadowDirty && scene.userData.lights.sun.shadow.intensity > 0) {
         renderer.shadowMap.needsUpdate = true;
-        shadowDirty = shadowSoft = false;
+        shadowDirty = shadowSoft = shadowFlow = false;
         shadowAt = time;
       }
       const start = performance.now(),

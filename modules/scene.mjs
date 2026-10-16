@@ -71,6 +71,9 @@ import { vehicle } from './traffic.mjs';
 import { buildLighting } from './lighting.mjs';
 import { concreteFinishes } from './materials.mjs';
 
+// Outer face of the abutment walls, inside the deck edge.
+const ABUTMENT_SIDE = 0.075;
+
 export function buildBridge(c, m, { batch = true } = {}) {
   const preview = approachSurfaces(c),
     L0 = totalLength(c),
@@ -440,13 +443,15 @@ export function buildBridge(c, m, { batch = true } = {}) {
     };
     const seatMin = Math.min(...Array.from({ length: 9 }, (_, n) => seatAt(-half + 0.15 + ((c.width - 0.3) * n) / 8)));
     if (!interior) {
+      // 0.6.2: the seat, the backwall, the return walls and the girder screens share one outer face (75 mm inside
+      // the deck edge); they previously stepped by 75 to 100 mm along the side of the abutment.
       const abutment = profiledSupportWall(
         structure,
         m.concrete,
         c,
         s,
-        -half + 0.15,
-        half - 0.15,
+        -half + ABUTMENT_SIDE,
+        half - ABUTMENT_SIDE,
         1.8,
         () => earth,
         u => seatAt(u),
@@ -459,8 +464,8 @@ export function buildBridge(c, m, { batch = true } = {}) {
         m.concrete,
         c,
         s + direction * 0.8,
-        -half + 0.15,
-        half - 0.15,
+        -half + ABUTMENT_SIDE,
+        half - ABUTMENT_SIDE,
         0.4,
         u => seatAt(u),
         (u, offset) =>
@@ -476,7 +481,7 @@ export function buildBridge(c, m, { batch = true } = {}) {
           c,
           Math.min(s, end),
           Math.max(s, end),
-          rect(-half + 0.15, half - 0.15, 0, -1),
+          rect(-half + ABUTMENT_SIDE, half - ABUTMENT_SIDE, 0, -1),
           c.frontSlopeMaterial === 'stone' ? m.stone : c.frontSlopeMaterial === 'concrete' ? m.concrete : m.grass,
           (_, station, v, u) =>
             v === 0 ? fit.top - Math.max(0, Math.abs(station - supportStation(c, s, u)) - 0.9) / 2 : earth + 1,
@@ -486,7 +491,7 @@ export function buildBridge(c, m, { batch = true } = {}) {
         setting.add(slope);
       }
       for (const side of c.approachWalls === 'mse' ? [] : [-1, 1]) {
-        const u = side * (half - 0.3),
+        const u = side * (half - ABUTMENT_SIDE - 0.225),
           p0 = supportPoint(c, s, u, 0),
           f = frame(c, supportStation(c, s, u), u),
           a = ((c.abutmentType === 'wing' ? c.wingAngle : 0) * Math.PI) / 180;
@@ -518,7 +523,7 @@ export function buildBridge(c, m, { batch = true } = {}) {
         for (const side of [-1, 1]) {
           const flange = c.material === 'concrete' ? 0.6 : c.material === 'box' ? c.boxTopWidth / 2 : 0.25,
             girderFace = half - c.overhang + flange + 0.03,
-            outer = half - 0.05,
+            outer = half - ABUTMENT_SIDE,
             inner = Math.min(outer - 0.12, Math.max(outer - 0.3, girderFace)),
             [s0, s1] = [s - direction * 0.9, s + direction * 0.6].sort((p, q) => p - q);
           const screen = sweep(
@@ -629,8 +634,11 @@ export function buildBridge(c, m, { batch = true } = {}) {
             ? [0]
             : Array.from({ length: columns }, (_, n) => -spread / 2 + (n * spread) / (columns - 1));
       for (const u of us) {
-        const f = supportBasis(c, s, u),
-          height = capUnder(u) - earth;
+        // A column under the tapered part of a cap reaches the highest point of the soffit over its width (it
+        // stopped at the soffit level on its axis: a gap on the outer half, 0.6.2).
+        const reach = (c.pierType === 'hammerhead' ? c.hammerheadWidth : c.columnDiameter) / 2,
+          f = supportBasis(c, s, u),
+          height = Math.max(capUnder(u - reach), capUnder(u), capUnder(u + reach)) - earth;
         if (c.pierType === 'portal') {
           // Square or rectangular portal legs, inclined in the support plane: the batter is the inward offset of
           // each footing (negative: legs spread towards the ground). Horizontal top and bottom faces.

@@ -215,16 +215,30 @@ export function buildLighting(c, m, ranges) {
     group.add(light);
     real.push(light);
   }
+  // The point lights always stay in the scene (switched by intensity): a change in the number of visible
+  // lights recompiles every lit material.
+  let lit = false,
+    hidden = false;
+  const show = () => {
+    for (const o of group.children) if (!o.isLight) o.visible = !hidden;
+    pooled.visible = lit && !hidden;
+    sprites.forEach(sprite => (sprite.visible = lit && !hidden));
+    for (const light of real) light.intensity = lit && !hidden ? (handrail ? 3 : 320) : 0;
+  };
   return {
     group,
     count: heads.length,
     setOn(on) {
+      lit = on;
       pool.opacity = on ? (handrail ? 0.55 : 0.42) : 0;
       glow.opacity = on ? 0.9 : 0;
       lens.emissiveIntensity = on ? (handrail ? 6 : 9) : 0;
-      for (const light of real) light.intensity = on ? (handrail ? 3 : 320) : 0;
-      pooled.visible = on;
-      sprites.forEach(sprite => (sprite.visible = on));
+      show();
+    },
+    // Reveal structure hides the poles, heads and glows (and switches their lamps off).
+    setHidden(hide) {
+      hidden = hide;
+      show();
     },
     dispose() {
       disc.dispose();
